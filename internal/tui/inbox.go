@@ -71,8 +71,12 @@ func (m Model) inboxLines(w, h int) []string {
 		}
 	}
 	multi := m.multiPlatform()
+	if len(m.visible) > 0 {
+		lines = append(lines, "") // breathing room under the heading
+	}
 	for i := m.offset; i < len(m.visible) && len(lines)+2 <= h; i++ {
 		lines = append(lines, m.inboxRow(m.visible[i], i == m.cursor, multi, w)...)
+		lines = append(lines, "") // space between chats
 	}
 	for len(lines) < h {
 		lines = append(lines, "")
@@ -108,7 +112,7 @@ func (m Model) inboxRow(c core.ChatSummary, selected, multi bool, w int) []strin
 	if c.Unread > 0 || selected {
 		nameStyle = nameStyle.Foreground(text).Bold(true)
 	}
-	nameRoom := w - 7 - cw.String(when) - 2
+	nameRoom := w - 7 - cw.String(when) - 3
 	name := highlightMatch(cw.Truncate(c.Title(), max(1, nameRoom), "…"), m.filter.Value(), nameStyle)
 
 	pill := ""
@@ -119,15 +123,16 @@ func (m Model) inboxRow(c core.ChatSummary, selected, multi bool, w int) []strin
 	if c.Unread > 0 {
 		previewStyle = bg(lipgloss.NewStyle().Foreground(secondary))
 	}
-	preview := previewStyle.Render(cw.Truncate(previewText(c), max(1, w-7-cw.String(pill)-2), "…"))
+	preview := previewStyle.Render(cw.Truncate(previewText(c), max(1, w-7-cw.String(pill)-3), "…"))
 
+	// Name and preview start in the same column; time and unread count end in the same column.
 	line := func(left, right string) string {
-		gap := max(1, w-cw.String(left)-cw.String(right)-1)
-		return left + plain.Render(strings.Repeat(" ", gap)) + right + plain.Render(" ")
+		gap := max(1, w-cw.String(left)-cw.String(right)-2)
+		return left + plain.Render(strings.Repeat(" ", gap)) + right + plain.Render("  ")
 	}
 	return []string{
 		line(edge+plain.Render(" ")+avatar(chatKey(c.Chat), c.Title())+plain.Render(" ")+name, when),
-		line(edge+plain.Render("       ")+preview, pill),
+		line(edge+plain.Render("      ")+preview, pill),
 	}
 }
 

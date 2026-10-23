@@ -19,14 +19,14 @@ var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp", core.T
 
 // Layout, Discord style: a shaded sidebar on the left, the conversation on the right, no
 // boxes. Row 0 is the top bar, row 1 headings and a rule, then the body, then key hints.
-func (m Model) leftW() int  { return min(max(m.width*30/100, 32), 44) }
+func (m Model) leftW() int  { return min(max(m.width*34/100, 34), 48) }
 func (m Model) rightW() int { return max(20, m.width-m.leftW()) }
 func (m Model) bodyH() int  { return max(3, m.height-3) } // minus top bar, headings, key hints
 
 func (m Model) filterShown() bool { return m.focus == focusFilter || m.filter.Value() != "" }
 
-// rows is how many inbox entries fit: two lines each.
-func (m Model) rows() int { return max(1, m.bodyH()/2) }
+// rows is how many inbox entries fit: a top gap, then two lines and a spacer per chat.
+func (m Model) rows() int { return max(1, m.bodyH()/3) }
 
 // on paints a background under a style, so a whole shaded area stays shaded between segments.
 func on(bg lipgloss.TerminalColor) func(lipgloss.Style) lipgloss.Style {
