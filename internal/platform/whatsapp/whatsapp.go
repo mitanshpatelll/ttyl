@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	_ "github.com/mattn/go-sqlite3" // session store driver
 	"github.com/mdp/qrterminal/v3"
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
@@ -184,13 +186,12 @@ func (c *Client) emit(evt core.Event) {
 func (c *Client) handle(evt any) {
 	switch v := evt.(type) {
 	case *events.Message:
-		chat, msg, ok := c.convert(v)
-		if !ok {
-			return
+		batch := core.BatchEvent{Platform: core.WhatsApp}
+		if msg, ok := c.add(&batch, v); ok && v.Info.IsGroup {
+			go c.fetchGroupName(msg.ChatID)
 		}
-		c.emit(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{chat}, Messages: []core.Message{msg}})
-		if chat.IsGroup {
-			go c.fetchGroupName(chat.ID)
+		if len(batch.Messages)+len(batch.Edits)+len(batch.Deletes)+len(batch.Reactions) > 0 {
+			c.emit(batch)
 		}
 	case *events.HistorySync:
 		c.handleHistory(v)
@@ -236,13 +237,28 @@ func (c *Client) handleHistory(v *events.HistorySync) {
 			if err != nil {
 				continue
 			}
-			_, msg, ok := c.convert(evt)
+			msg, ok := c.add(&batch, evt)
 			if !ok {
 				continue
 			}
-			batch.Messages = append(batch.Messages, msg)
 			if !msg.FromMe {
 				incoming = append(incoming, msg.Timestamp)
+			}
+			// History carries reactions on the message itself rather than as separate events.
+			for _, r := range hm.GetMessage().GetReactions() {
+				key := r.GetKey()
+				reactor := chatJID
+				if key.GetFromMe() {
+					reactor = c.cli.Store.GetJID().ToNonAD()
+				} else if p, err := types.ParseJID(key.GetParticipant()); err == nil && !p.IsEmpty() {
+					reactor = c.normalize(p)
+				}
+				batch.Reactions = append(batch.Reactions, core.Reaction{
+					MessageRef: core.MessageRef{ChatID: chat.ID, ID: msg.ID},
+					SenderID:   reactor.String(),
+					Emoji:      r.GetText(),
+					Timestamp:  time.UnixMilli(r.GetSenderTimestampMS()),
+				})
 			}
 		}
 		// The phone reports an unread count; turn it into a read marker just before the oldest unread message.
@@ -307,7 +323,7 @@ func (c *Client) fetchGroupName(chatID string) {
 // so one person is one chat no matter how WhatsApp addressed the message.
 func (c *Client) normalize(jid types.JID) types.JID {
 	jid = jid.ToNonAD()
-	if jid.Server == types.HiddenUserServer {
+	if jid.Server == types.HiddenUserServer && c.cli.Store.Initialized {
 		if pn, err := c.cli.Store.LIDs.GetPNForLID(c.ctx, jid); err == nil && !pn.IsEmpty() {
 			return pn.ToNonAD()
 		}
@@ -316,6 +332,9 @@ func (c *Client) normalize(jid types.JID) types.JID {
 }
 
 func (c *Client) contactName(jid types.JID, pushName string) string {
+	if !c.cli.Store.Initialized { // stores exist only once paired
+		return pushName
+	}
 	info, err := c.cli.Store.Contacts.GetContact(c.ctx, jid)
 	if (err != nil || !info.Found) && jid.Server == types.DefaultUserServer {
 		if lid, err := c.cli.Store.LIDs.GetLIDForPN(c.ctx, jid); err == nil && !lid.IsEmpty() {
@@ -339,20 +358,51 @@ func skipChat(jid types.JID) bool {
 	return jid == types.StatusBroadcastJID || jid.Server == types.NewsletterServer
 }
 
-func (c *Client) convert(evt *events.Message) (core.Chat, core.Message, bool) {
+// add appends what a WhatsApp message means to batch: a new message (returned with ok),
+// or an edit, delete or reaction to an earlier one.
+func (c *Client) add(batch *core.BatchEvent, evt *events.Message) (msg core.Message, ok bool) {
 	info := evt.Info
 	if skipChat(info.Chat) {
-		return core.Chat{}, core.Message{}, false
-	}
-	kind, body, meta := describe(evt.Message)
-	if kind == "" {
-		return core.Chat{}, core.Message{}, false
+		return msg, false
 	}
 	chatJID, senderJID := c.normalize(info.Chat), c.normalize(info.Sender)
-	chat := core.Chat{Platform: core.WhatsApp, ID: chatJID.String(), IsGroup: info.IsGroup}
-	msg := core.Message{
+	chatID := chatJID.String()
+	m := evt.Message
+
+	if pm := m.GetProtocolMessage(); pm != nil {
+		target := core.MessageRef{ChatID: chatID, ID: pm.GetKey().GetID()}
+		switch pm.GetType() {
+		case waE2E.ProtocolMessage_REVOKE:
+			batch.Deletes = append(batch.Deletes, target)
+		case waE2E.ProtocolMessage_MESSAGE_EDIT:
+			if kind, body, meta := describe(pm.GetEditedMessage()); kind != "" {
+				batch.Edits = append(batch.Edits, core.Edit{MessageRef: target, Kind: kind, Body: body, Meta: meta})
+			}
+		}
+		return msg, false
+	}
+	if r := m.GetReactionMessage(); r != nil {
+		ts := info.Timestamp
+		if ms := r.GetSenderTimestampMS(); ms > 0 {
+			ts = time.UnixMilli(ms)
+		}
+		batch.Reactions = append(batch.Reactions, core.Reaction{
+			MessageRef: core.MessageRef{ChatID: chatID, ID: r.GetKey().GetID()},
+			SenderID:   senderJID.String(),
+			Emoji:      r.GetText(),
+			Timestamp:  ts,
+		})
+		return msg, false
+	}
+
+	kind, body, meta := describe(m)
+	if kind == "" {
+		return msg, false
+	}
+	chat := core.Chat{Platform: core.WhatsApp, ID: chatID, IsGroup: info.IsGroup}
+	msg = core.Message{
 		Platform:  core.WhatsApp,
-		ChatID:    chat.ID,
+		ChatID:    chatID,
 		ID:        info.ID,
 		SenderID:  senderJID.String(),
 		FromMe:    info.IsFromMe,
@@ -360,6 +410,7 @@ func (c *Client) convert(evt *events.Message) (core.Chat, core.Message, bool) {
 		Kind:      kind,
 		Body:      body,
 		Meta:      meta,
+		Edited:    evt.IsEdit,
 	}
 	if !info.IsFromMe {
 		msg.SenderName = c.contactName(senderJID, info.PushName)
@@ -367,7 +418,102 @@ func (c *Client) convert(evt *events.Message) (core.Chat, core.Message, bool) {
 			chat.Name = msg.SenderName
 		}
 	}
-	return chat, msg, true
+	if handle := mediaHandle(m); handle != nil {
+		msg.Media, msg.HasMedia = handle, true
+	}
+	batch.Chats = append(batch.Chats, chat)
+	batch.Messages = append(batch.Messages, msg)
+	return msg, true
+}
+
+// mediaHandle keeps what Download needs: the message proto without its inline thumbnails.
+func mediaHandle(m *waE2E.Message) []byte {
+	if m.GetImageMessage() == nil && m.GetVideoMessage() == nil && m.GetPtvMessage() == nil &&
+		m.GetAudioMessage() == nil && m.GetDocumentMessage() == nil && m.GetStickerMessage() == nil {
+		return nil
+	}
+	m = proto.Clone(m).(*waE2E.Message)
+	m.MessageContextInfo = nil
+	if x := m.GetImageMessage(); x != nil {
+		x.JPEGThumbnail = nil
+	}
+	if x := m.GetVideoMessage(); x != nil {
+		x.JPEGThumbnail = nil
+	}
+	if x := m.GetPtvMessage(); x != nil {
+		x.JPEGThumbnail = nil
+	}
+	if x := m.GetDocumentMessage(); x != nil {
+		x.JPEGThumbnail = nil
+	}
+	if x := m.GetStickerMessage(); x != nil {
+		x.PngThumbnail = nil
+	}
+	data, err := proto.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func (c *Client) Download(ctx context.Context, msg core.Message, handle []byte) ([]byte, string, error) {
+	var m waE2E.Message
+	if err := proto.Unmarshal(handle, &m); err != nil {
+		return nil, "", fmt.Errorf("bad media handle: %w", err)
+	}
+	var data []byte
+	var err error
+	if v := m.GetPtvMessage(); v != nil {
+		data, err = c.cli.Download(ctx, v)
+	} else {
+		data, err = c.cli.DownloadAny(ctx, &m)
+	}
+	if errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) || errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
+		return nil, "", errors.New("media expired on WhatsApp's servers; open it on your phone")
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
+	name := m.GetDocumentMessage().GetFileName()
+	if name == "" {
+		mimetype := ""
+		for _, mt := range []string{m.GetImageMessage().GetMimetype(), m.GetVideoMessage().GetMimetype(), m.GetPtvMessage().GetMimetype(),
+			m.GetAudioMessage().GetMimetype(), m.GetDocumentMessage().GetMimetype(), m.GetStickerMessage().GetMimetype()} {
+			if mt != "" {
+				mimetype = mt
+				break
+			}
+		}
+		name = msg.ID + extension(mimetype)
+	}
+	return data, name, nil
+}
+
+func extension(mimetype string) string {
+	base, _, _ := strings.Cut(mimetype, ";")
+	switch strings.TrimSpace(base) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/webp":
+		return ".webp"
+	case "video/mp4":
+		return ".mp4"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/mp4":
+		return ".m4a"
+	case "application/pdf":
+		return ".pdf"
+	}
+	if exts, _ := mime.ExtensionsByType(base); len(exts) > 0 {
+		return exts[0]
+	}
+	return ".bin"
 }
 
 // describe maps a WhatsApp message to a kind, text and detail. Unsupported kinds (reactions,

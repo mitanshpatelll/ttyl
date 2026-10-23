@@ -63,6 +63,39 @@ type Message struct {
 	Kind       Kind
 	Body       string // text, or the caption for media
 	Meta       string // kind-specific detail: duration, file name, URL
+	Edited     bool
+	Deleted    bool // deleted by the sender; content is gone
+	HasMedia   bool
+	Reactions  []ReactionCount // filled when read from the store
+
+	// Media is an opaque, platform-specific handle for downloading the attachment later.
+	// Only set when writing; read it back with Store.Media.
+	Media []byte
+}
+
+type ReactionCount struct {
+	Emoji string
+	Count int
+}
+
+// MessageRef points at a message that may or may not be stored yet.
+type MessageRef struct {
+	ChatID string
+	ID     string
+}
+
+type Edit struct {
+	MessageRef
+	Kind Kind
+	Body string
+	Meta string
+}
+
+type Reaction struct {
+	MessageRef
+	SenderID  string
+	Emoji     string // empty removes the sender's reaction
+	Timestamp time.Time
 }
 
 func (m Message) Sender() string {
@@ -96,10 +129,13 @@ type Event interface{ isEvent() }
 
 // BatchEvent carries chats and messages to persist, from live traffic or history sync.
 type BatchEvent struct {
-	Platform PlatformID
-	Chats    []Chat // created, or renamed when Name is set
-	Messages []Message
-	ReadUpTo map[string]time.Time // chat ID -> read on another device up to this time
+	Platform  PlatformID
+	Chats     []Chat // created, or renamed when Name is set
+	Messages  []Message
+	Edits     []Edit
+	Deletes   []MessageRef
+	Reactions []Reaction
+	ReadUpTo  map[string]time.Time // chat ID -> read on another device up to this time
 }
 
 type StatusEvent struct {
@@ -126,4 +162,10 @@ type Platform interface {
 	// MarkRead sends read receipts ("seen") for the given incoming messages.
 	MarkRead(ctx context.Context, chat Chat, msgs []Message) error
 	Events() <-chan Event
+}
+
+// MediaDownloader is implemented by platforms that can fetch attachments on demand.
+type MediaDownloader interface {
+	// Download fetches the attachment described by handle (Message.Media) and suggests a file name.
+	Download(ctx context.Context, msg Message, handle []byte) (data []byte, filename string, err error)
 }

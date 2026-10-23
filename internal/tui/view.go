@@ -96,11 +96,15 @@ func (m Model) viewFooter() string {
 	case focusCompose:
 		hints = "enter send · esc stop typing"
 	case focusChat:
-		hints = "j/k scroll · g/G top/bottom · i reply · esc inbox · q quit"
+		hints = "j/k select · o open media · i reply · esc inbox · q quit"
 	default:
 		hints = "j/k move · enter open · i reply · / filter · tab chat · q quit"
 	}
-	return spread(" "+dimStyle.Render(hints), errorStyle.Render(m.flash)+" ", m.width)
+	status := errorStyle.Render(m.flash)
+	if m.flash == "" {
+		status = accentStyle.Render(m.note)
+	}
+	return spread(" "+dimStyle.Render(hints), status+" ", m.width)
 }
 
 func (m Model) viewInbox(w, h int) string {
@@ -181,54 +185,83 @@ func (m Model) viewChat(w, h int) string {
 
 // renderChat rebuilds the message log for the viewport.
 func (m *Model) renderChat() {
-	w := m.chatView.Width
+	w := m.chatView.Width - 2 // two-column gutter for the selection marker
 	if w <= 0 || m.open == nil {
 		return
 	}
+	m.starts = m.starts[:0]
 	if len(m.messages) == 0 {
 		m.chatView.SetContent(dimStyle.Render("No messages yet."))
 		return
 	}
-	var b strings.Builder
+	var lines []string
 	var lastDay string
 	now := time.Now()
-	for _, msg := range m.messages {
+	for i, msg := range m.messages {
 		if day := dayLabel(msg.Timestamp, now); day != lastDay {
 			lastDay = day
-			b.WriteString(lipgloss.PlaceHorizontal(w, lipgloss.Center, dimStyle.Render("── "+day+" ──")) + "\n")
+			lines = append(lines, "  "+lipgloss.PlaceHorizontal(w, lipgloss.Center, dimStyle.Render("── "+day+" ──")))
 		}
-		sender := senderStyle(msg.SenderID)
-		if msg.FromMe {
-			sender = boldStyle.Foreground(accent)
+		m.starts = append(m.starts, len(lines))
+		gutter := "  "
+		if i == m.sel && m.focus == focusChat {
+			gutter = accentStyle.Render("▌ ")
 		}
-		head := dimStyle.Render(msg.Timestamp.Format("15:04")) + " " + sender.Render(msg.Sender()) + " "
-		text := msg.Body
-		if tag := mediaTag(msg); tag != "" {
-			text = strings.TrimSpace(tagStyle.Render(tag) + " " + text)
-		}
-
-		// Hanging indent: wrapped lines align under the first line's text.
-		indent := lipgloss.Width(head)
-		if indent > w/2 {
-			b.WriteString(head + "\n")
-			indent = 2
-			head = strings.Repeat(" ", indent)
-		}
-		for i, line := range strings.Split(lipgloss.NewStyle().Width(w-indent).Render(text), "\n") {
-			if i == 0 {
-				b.WriteString(head)
-			} else {
-				b.WriteString(strings.Repeat(" ", indent))
-			}
-			b.WriteString(line + "\n")
+		for _, l := range messageLines(msg, w) {
+			lines = append(lines, gutter+l)
 		}
 	}
-	content := strings.TrimSuffix(b.String(), "\n")
 	// Short chats sit at the bottom, next to the composer, like any chat app.
-	if pad := m.chatView.Height - strings.Count(content, "\n") - 1; pad > 0 {
-		content = strings.Repeat("\n", pad) + content
+	if pad := m.chatView.Height - len(lines); pad > 0 {
+		lines = append(make([]string, pad), lines...)
+		for i := range m.starts {
+			m.starts[i] += pad
+		}
 	}
-	m.chatView.SetContent(content)
+	m.chatView.SetContent(strings.Join(lines, "\n"))
+}
+
+// messageLines renders one message to width w: time, sender, text with a hanging indent, reactions.
+func messageLines(msg core.Message, w int) []string {
+	sender := senderStyle(msg.SenderID)
+	if msg.FromMe {
+		sender = boldStyle.Foreground(accent)
+	}
+	head := dimStyle.Render(msg.Timestamp.Format("15:04")) + " " + sender.Render(msg.Sender()) + " "
+	text := msg.Body
+	if tag := mediaTag(msg); tag != "" {
+		text = strings.TrimSpace(tagStyle.Render(tag) + " " + text)
+	}
+	if msg.Edited && !msg.Deleted {
+		text += dimStyle.Render(" (edited)")
+	}
+
+	var out []string
+	indent := lipgloss.Width(head)
+	if indent > w/2 {
+		out = append(out, head)
+		indent = 2
+		head = "  "
+	}
+	pad := strings.Repeat(" ", indent)
+	for i, line := range strings.Split(lipgloss.NewStyle().Width(w-indent).Render(text), "\n") {
+		if i == 0 {
+			out = append(out, head+line)
+		} else {
+			out = append(out, pad+line)
+		}
+	}
+	if len(msg.Reactions) > 0 {
+		parts := make([]string, len(msg.Reactions))
+		for i, r := range msg.Reactions {
+			parts[i] = r.Emoji
+			if r.Count > 1 {
+				parts[i] += fmt.Sprint(r.Count)
+			}
+		}
+		out = append(out, pad+ansi.Truncate(dimStyle.Render(strings.Join(parts, "  ")), w-indent, "…"))
+	}
+	return out
 }
 
 // mediaTag is the placeholder shown instead of media. Nothing autoplays or renders inline.
@@ -238,6 +271,9 @@ func mediaTag(msg core.Message) string {
 			return "[" + tag + "]"
 		}
 		return "[" + tag + " " + detail + "]"
+	}
+	if msg.Deleted {
+		return "[deleted]"
 	}
 	switch msg.Kind {
 	case core.KindImage:

@@ -3,6 +3,7 @@ package tui
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,7 +37,11 @@ type (
 		msgs    []core.Message
 		err     error
 	}
-	sentMsg struct{ err error }
+	sentMsg  struct{ err error }
+	mediaMsg struct {
+		path string
+		err  error
+	}
 	tickMsg struct{}
 )
 
@@ -54,12 +59,16 @@ type Model struct {
 
 	open     *core.Chat
 	messages []core.Message
+	limit    int   // how many messages of the open chat are loaded
+	sel      int   // selected message; the newest one follows new arrivals
+	starts   []int // first viewport line of each message, set by renderChat
 	chatView viewport.Model
 
 	filter  textinput.Model
 	compose textinput.Model
 
 	flash string // last error, cleared on the next key press
+	note  string // last info message, cleared on the next key press
 }
 
 func New(a *app.App) Model {
@@ -94,11 +103,11 @@ func (m Model) loadChat() tea.Cmd {
 	if m.open == nil {
 		return nil
 	}
-	a, chat := m.app, *m.open
+	a, chat, limit := m.app, *m.open, m.limit
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		msgs, err := a.Open(ctx, chat, time.Now())
+		msgs, err := a.Open(ctx, chat, time.Now(), limit)
 		return messagesMsg{chatKey(chat), msgs, err}
 	}
 }
@@ -109,6 +118,16 @@ func (m Model) send(text string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return sentMsg{a.Send(ctx, chat, text)}
+	}
+}
+
+func (m Model) openMedia(msg core.Message) tea.Cmd {
+	a := m.app
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		path, err := a.OpenMedia(ctx, msg)
+		return mediaMsg{path, err}
 	}
 }
 
@@ -149,12 +168,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.open == nil || chatKey(*m.open) != msg.chatKey {
 			return m, nil // reply for a chat we already left
 		}
-		follow := len(m.messages) == 0 || m.chatView.AtBottom()
-		m.messages = msg.msgs
-		m.renderChat()
-		if follow {
-			m.chatView.GotoBottom()
+		// Keep the selected message selected; if it was the newest, follow new arrivals.
+		keep := ""
+		if m.sel < len(m.messages)-1 {
+			keep = m.messages[m.sel].ID
 		}
+		m.messages = msg.msgs
+		m.sel = len(m.messages) - 1
+		for i, x := range m.messages {
+			if x.ID == keep {
+				m.sel = i
+			}
+		}
+		m.renderChat()
+		m.showSelected()
 		m.clearUnread(msg.chatKey)
 		return m, nil
 
@@ -164,8 +191,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.loadChat(), m.loadInbox())
 
+	case mediaMsg:
+		if msg.err != nil {
+			m.flash = msg.err.Error()
+		} else {
+			m.note = "saved " + filepath.Base(msg.path)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
-		m.flash = ""
+		m.flash, m.note = "", ""
 		return m.handleKey(msg)
 	}
 
@@ -207,11 +242,12 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch k.String() {
 		case "esc":
 			m.compose.Blur()
-			m.focus = focusChat
+			m.setFocus(focusChat)
 		case "enter":
 			text := strings.TrimSpace(m.compose.Value())
 			if text != "" {
 				m.compose.Reset()
+				m.sel = len(m.messages) - 1 // follow the reply
 				cmd = m.send(text)
 			}
 		default:
@@ -223,14 +259,32 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "esc", "h", "left", "tab":
-			m.focus = focusInbox
+			m.setFocus(focusInbox)
 		case "i", "enter":
-			m.focus = focusCompose
+			m.setFocus(focusCompose)
 			cmd = m.compose.Focus()
+		case "j", "down":
+			m.selectMessage(m.sel + 1)
+		case "k", "up":
+			if m.sel == 0 && len(m.messages) >= m.limit {
+				m.limit += app.HistoryPage
+				m.note = "loading older messages…"
+				cmd = m.loadChat()
+			}
+			m.selectMessage(m.sel - 1)
 		case "g", "home":
-			m.chatView.GotoTop()
+			m.selectMessage(0)
 		case "G", "end":
-			m.chatView.GotoBottom()
+			m.selectMessage(len(m.messages) - 1)
+		case "o":
+			switch {
+			case m.sel < 0 || m.sel >= len(m.messages):
+			case !m.messages[m.sel].HasMedia:
+				m.note = "no attachment on this message"
+			default:
+				m.note = "downloading…"
+				cmd = m.openMedia(m.messages[m.sel])
+			}
 		default:
 			m.chatView, cmd = m.chatView.Update(k)
 		}
@@ -266,11 +320,17 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd = m.openSelected(focusCompose)
 		case "tab":
 			if m.open != nil {
-				m.focus = focusChat
+				m.setFocus(focusChat)
 			}
 		}
 	}
 	return m, cmd
+}
+
+// setFocus switches panes; the chat re-renders because the selection marker only shows when it has focus.
+func (m *Model) setFocus(f focus) {
+	m.focus = f
+	m.renderChat()
 }
 
 func (m *Model) openSelected(f focus) tea.Cmd {
@@ -280,15 +340,43 @@ func (m *Model) openSelected(f focus) tea.Cmd {
 	chat := m.visible[m.cursor].Chat
 	if m.open == nil || chatKey(*m.open) != chatKey(chat) {
 		m.open = &chat
-		m.messages = nil
+		m.messages, m.starts, m.sel = nil, nil, -1
+		m.limit = app.HistoryPage
 		m.chatView.SetContent("")
 		m.compose.Reset()
 	}
-	m.focus = f
+	m.setFocus(f)
 	if f == focusCompose {
 		return tea.Batch(m.loadChat(), m.compose.Focus())
 	}
 	return m.loadChat()
+}
+
+func (m *Model) selectMessage(i int) {
+	if len(m.messages) == 0 {
+		return
+	}
+	m.sel = min(max(i, 0), len(m.messages)-1)
+	m.renderChat()
+	m.showSelected()
+}
+
+// showSelected scrolls the chat so the selected message is in view (its top, if it is taller than the view).
+func (m *Model) showSelected() {
+	if m.sel < 0 || m.sel >= len(m.starts) {
+		m.chatView.GotoBottom()
+		return
+	}
+	start, end := m.starts[m.sel], m.chatView.TotalLineCount()-1
+	if m.sel+1 < len(m.starts) {
+		end = m.starts[m.sel+1] - 1
+	}
+	if end >= m.chatView.YOffset+m.chatView.Height {
+		m.chatView.SetYOffset(end - m.chatView.Height + 1)
+	}
+	if start < m.chatView.YOffset {
+		m.chatView.SetYOffset(start)
+	}
 }
 
 func (m *Model) move(delta int) {
@@ -353,5 +441,6 @@ func (m *Model) layout() {
 	m.compose.Width = max(1, rw-len(m.compose.Prompt)-1)
 	m.filter.Width = max(1, m.leftInnerWidth()-len(m.filter.Prompt)-1)
 	m.renderChat()
+	m.showSelected()
 	m.scrollInbox()
 }

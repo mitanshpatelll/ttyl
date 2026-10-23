@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,7 +105,7 @@ func TestLayoutAndFlow(t *testing.T) {
 	}
 	r, _ := rules.New(nil)
 	fake := &fakePlatform{}
-	a := app.New(st, r, false, zerolog.Nop(), fake)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, fake)
 
 	m := New(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
@@ -157,5 +158,77 @@ func checkFits(t *testing.T, m Model, label string) {
 		if w := lipgloss.Width(l); w > m.width {
 			t.Errorf("%s: line %d is %d wide, max %d: %q", label, i, w, m.width, l)
 		}
+	}
+}
+
+func (f *fakePlatform) Download(context.Context, core.Message, []byte) ([]byte, string, error) {
+	return []byte("x"), "photo.jpg", nil
+}
+
+func TestChatSelectionMediaAndPaging(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	chat := "15550001@s.whatsapp.net"
+	start := time.Now().Add(-time.Duration(app.HistoryPage+50) * time.Minute)
+	var msgs []core.Message
+	for i := range app.HistoryPage + 50 {
+		msgs = append(msgs, core.Message{Platform: core.WhatsApp, ChatID: chat, ID: fmt.Sprintf("m%03d", i), SenderID: chat,
+			Timestamp: start.Add(time.Duration(i) * time.Minute), Kind: core.KindText, Body: fmt.Sprintf("message %d", i)})
+	}
+	last := len(msgs) - 1
+	msgs[last].Kind, msgs[last].Media, msgs[last].HasMedia = core.KindImage, []byte("h"), true
+	msgs[last-1].Edited = true
+	err = st.Apply(core.BatchEvent{
+		Platform:  core.WhatsApp,
+		Chats:     []core.Chat{{Platform: core.WhatsApp, ID: chat, Name: "Mom"}},
+		Messages:  msgs,
+		Deletes:   []core.MessageRef{{ChatID: chat, ID: msgs[last-2].ID}},
+		Reactions: []core.Reaction{{MessageRef: core.MessageRef{ChatID: chat, ID: msgs[last-1].ID}, SenderID: "x", Emoji: "👍", Timestamp: time.Now()}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := rules.New(nil)
+	var revealed string
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(),
+		Reveal: func(p string) error { revealed = p; return nil }}, &fakePlatform{})
+
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 20})
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, key("enter"))
+	if len(m.messages) != app.HistoryPage || m.sel != app.HistoryPage-1 {
+		t.Fatalf("loaded %d, sel %d", len(m.messages), m.sel)
+	}
+	view := m.View()
+	for _, want := range []string{"[photo]", "[deleted]", "(edited)", "👍", "▌"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("chat view missing %q:\n%s", want, view)
+		}
+	}
+	checkFits(t, m, "chat with reactions")
+
+	m = step(t, m, key("o"))
+	if !strings.HasSuffix(revealed, "photo.jpg") || !strings.Contains(m.note, "photo.jpg") {
+		t.Errorf("o: revealed %q, note %q", revealed, m.note)
+	}
+	m = step(t, m, key("k"))
+	m = step(t, m, key("o"))
+	if m.note != "no attachment on this message" {
+		t.Errorf("o on text: note %q", m.note)
+	}
+
+	// Walking past the oldest loaded message loads the next page and keeps the selection.
+	m = step(t, m, key("g"))
+	oldest := m.messages[0].ID
+	m = step(t, m, key("k"))
+	if len(m.messages) != app.HistoryPage+50 || m.messages[m.sel].ID != oldest {
+		t.Errorf("after paging: %d messages, selected %q, want %q", len(m.messages), m.messages[m.sel].ID, oldest)
+	}
+	if top := m.starts[m.sel]; top < m.chatView.YOffset || top >= m.chatView.YOffset+m.chatView.Height {
+		t.Errorf("selected message (line %d) not in view [%d, %d)", top, m.chatView.YOffset, m.chatView.YOffset+m.chatView.Height)
 	}
 }

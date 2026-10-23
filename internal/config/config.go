@@ -53,6 +53,18 @@ func Dir() (string, error) {
 	return dir, os.Chmod(dir, 0o700)
 }
 
+// MediaDir is where opened attachments are cached: $DMZ_HOME/media, or ~/Library/Caches/dmz/media.
+func MediaDir() (string, error) {
+	if home := os.Getenv("DMZ_HOME"); home != "" {
+		return filepath.Join(home, "media"), nil
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, "dmz", "media"), nil
+}
+
 // Load reads config.toml from dir, writing the default file on first run.
 func Load(dir string) (Config, error) {
 	path := filepath.Join(dir, "config.toml")

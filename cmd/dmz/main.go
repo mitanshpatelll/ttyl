@@ -83,7 +83,12 @@ func run() error {
 		return err
 	}
 
-	a := app.New(st, r, cfg.Focus.ReadReceipts, log, wa)
+	mediaDir, err := config.MediaDir()
+	if err != nil {
+		return err
+	}
+	a := app.New(app.Options{Store: st, Rules: r, ReadReceipts: cfg.Focus.ReadReceipts, MediaDir: mediaDir, Log: log}, wa)
+	a.CleanMedia()
 	// Start consuming events before login: history sync begins right after pairing.
 	go a.Run(ctx)
 

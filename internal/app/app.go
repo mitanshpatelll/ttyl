@@ -14,12 +14,25 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/store"
 )
 
-const historyLimit = 300
+// HistoryPage is how many messages a chat loads at a time.
+const HistoryPage = 300
+
+type Options struct {
+	Store        *store.Store
+	Rules        rules.Rules
+	ReadReceipts bool
+	MediaDir     string // where opened attachments are saved
+	Log          zerolog.Logger
+	// Reveal hands a saved attachment to the OS; nil uses the default app (or Finder for risky types).
+	Reveal func(path string) error
+}
 
 type App struct {
 	store        *store.Store
 	rules        rules.Rules
 	readReceipts bool
+	mediaDir     string
+	reveal       func(path string) error
 	platforms    map[core.PlatformID]core.Platform
 	log          zerolog.Logger
 
@@ -40,16 +53,21 @@ type Inbox struct {
 	Receipts bool
 }
 
-func New(st *store.Store, r rules.Rules, readReceipts bool, log zerolog.Logger, platforms ...core.Platform) *App {
+func New(o Options, platforms ...core.Platform) *App {
 	a := &App{
-		store:        st,
-		rules:        r,
-		readReceipts: readReceipts,
+		store:        o.Store,
+		rules:        o.Rules,
+		readReceipts: o.ReadReceipts,
+		mediaDir:     o.MediaDir,
+		reveal:       o.Reveal,
 		platforms:    map[core.PlatformID]core.Platform{},
-		log:          log,
+		log:          o.Log,
 		status:       map[core.PlatformID]core.StatusEvent{},
 		sync:         map[core.PlatformID]int{},
 		changed:      make(chan struct{}, 1),
+	}
+	if a.reveal == nil {
+		a.reveal = reveal
 	}
 	for _, p := range platforms {
 		a.platforms[p.ID()] = p
@@ -131,9 +149,9 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 	return in, nil
 }
 
-// Open loads a chat's visible history and marks it read locally. Read receipts are
-// only sent to the platform when enabled in config.
-func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time) ([]core.Message, error) {
+// Open loads the newest limit visible messages of a chat and marks it read locally.
+// Read receipts are only sent to the platform when enabled in config.
+func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int) ([]core.Message, error) {
 	cut := a.cutoff(now)
 	if a.readReceipts {
 		unread, err := a.store.Unread(chat.Platform, chat.ID, cut)
@@ -146,7 +164,7 @@ func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time) ([]core.M
 			}
 		}
 	}
-	msgs, err := a.store.Messages(chat.Platform, chat.ID, cut, historyLimit)
+	msgs, err := a.store.Messages(chat.Platform, chat.ID, cut, limit)
 	if err != nil {
 		return nil, err
 	}
