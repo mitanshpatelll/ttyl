@@ -59,6 +59,15 @@ var migrations = []string{
 
 	// 3: settings (key check and encryption state)
 	`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+
+	// 4: daily usage for the time budget and dmz stats
+	`CREATE TABLE usage (
+		day        TEXT    PRIMARY KEY, -- local date, YYYY-MM-DD
+		seconds    INTEGER NOT NULL DEFAULT 0,
+		opens      INTEGER NOT NULL DEFAULT 0,
+		sent       INTEGER NOT NULL DEFAULT 0,
+		extensions INTEGER NOT NULL DEFAULT 0
+	);`,
 }
 
 type Store struct {
@@ -384,6 +393,21 @@ func (s *Store) Media(platform core.PlatformID, chatID, id string) ([]byte, erro
 		return nil, err
 	}
 	return s.sealer.openBytes(media, msgAAD(string(platform), chatID, id, "media")...)
+}
+
+// DeletePlatform removes every stored chat, message and reaction of a platform.
+func (s *Store) DeletePlatform(platform core.PlatformID) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, table := range []string{"reactions", "messages", "chats"} {
+		if _, err := tx.Exec(`DELETE FROM `+table+` WHERE platform = ?`, platform); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // MarkRead moves a chat's local read marker forward. It never sends anything to the platform.

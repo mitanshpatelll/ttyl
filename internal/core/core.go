@@ -9,7 +9,11 @@ import (
 
 type PlatformID string
 
-const WhatsApp PlatformID = "whatsapp"
+const (
+	WhatsApp  PlatformID = "whatsapp"
+	Telegram  PlatformID = "telegram"
+	Instagram PlatformID = "instagram"
+)
 
 type Kind string
 

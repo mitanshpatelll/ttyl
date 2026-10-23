@@ -34,6 +34,9 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return ""
 	}
+	if m.inbox.Locked() {
+		return m.viewLocked()
+	}
 	lw, rw, ih := m.leftInnerWidth(), m.rightInnerWidth(), m.innerHeight()
 	left := paneStyle(m.focus == focusInbox || m.focus == focusFilter).Width(lw).Height(ih).Render(m.viewInbox(lw, ih))
 	right := paneStyle(m.focus == focusChat || m.focus == focusCompose).Width(rw).Height(ih).Render(m.viewChat(rw, ih))
@@ -66,7 +69,41 @@ func (m Model) viewHeader() string {
 	} else {
 		right += " · receipts off"
 	}
-	return spread(left, dimStyle.Render(right)+" ", m.width)
+	right = dimStyle.Render(right)
+	if m.inbox.Limit > 0 {
+		remaining := m.inbox.Limit - m.inbox.Used
+		style := dimStyle
+		if remaining <= 5*time.Minute {
+			style = lipgloss.NewStyle().Foreground(yellow)
+		}
+		right += style.Render(fmt.Sprintf(" · %s left", minutes(remaining)))
+	}
+	return spread(left, right+" ", m.width)
+}
+
+func minutes(d time.Duration) string {
+	if d < time.Minute {
+		return "<1m"
+	}
+	return fmt.Sprintf("%dm", int(d.Minutes()))
+}
+
+func (m Model) viewLocked() string {
+	body := []string{
+		boldStyle.Render("Today's dmz time is used up"),
+		"",
+		fmt.Sprintf("You spent %s here today (budget %s).", minutes(m.inbox.Used), minutes(m.inbox.Limit)),
+		"Messages keep arriving and will be here tomorrow.",
+		"",
+		dimStyle.Render("q quit · e extend by 5 minutes (counted in dmz stats)"),
+	}
+	if m.extend.Focused() {
+		body = append(body, "", m.extend.View())
+	}
+	if m.flash != "" {
+		body = append(body, "", errorStyle.Render(m.flash))
+	}
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, strings.Join(body, "\n"))
 }
 
 func statusText(s core.StatusEvent) string {

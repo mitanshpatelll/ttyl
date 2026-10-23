@@ -17,11 +17,15 @@ import (
 // HistoryPage is how many messages a chat loads at a time.
 const HistoryPage = 300
 
+// ExtensionStep is how much one "extend" adds to today's time budget.
+const ExtensionStep = 5 * time.Minute
+
 type Options struct {
 	Store        *store.Store
 	Rules        rules.Rules
 	ReadReceipts bool
-	MediaDir     string // where opened attachments are saved
+	MediaDir     string        // where opened attachments are saved
+	DailyLimit   time.Duration // time budget per day; 0 = no budget
 	Log          zerolog.Logger
 	// Reveal hands a saved attachment to the OS; nil uses the default app (or Finder for risky types).
 	Reveal func(path string) error
@@ -32,6 +36,7 @@ type App struct {
 	rules        rules.Rules
 	readReceipts bool
 	mediaDir     string
+	dailyLimit   time.Duration
 	reveal       func(path string) error
 	platforms    map[core.PlatformID]core.Platform
 	log          zerolog.Logger
@@ -51,7 +56,12 @@ type Inbox struct {
 	Status   map[core.PlatformID]core.StatusEvent
 	Sync     map[core.PlatformID]int
 	Receipts bool
+	Used     time.Duration // dmz time today
+	Limit    time.Duration // today's budget including extensions; 0 = no budget
 }
+
+// Locked reports whether today's time budget is used up.
+func (in Inbox) Locked() bool { return in.Limit > 0 && in.Used >= in.Limit }
 
 func New(o Options, platforms ...core.Platform) *App {
 	a := &App{
@@ -59,6 +69,7 @@ func New(o Options, platforms ...core.Platform) *App {
 		rules:        o.Rules,
 		readReceipts: o.ReadReceipts,
 		mediaDir:     o.MediaDir,
+		dailyLimit:   o.DailyLimit,
 		reveal:       o.Reveal,
 		platforms:    map[core.PlatformID]core.Platform{},
 		log:          o.Log,
@@ -138,6 +149,14 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 	if !a.rules.Live() {
 		in.Next = a.rules.Next(now)
 	}
+	used, extensions, err := a.store.UsageToday(now)
+	if err != nil {
+		return Inbox{}, err
+	}
+	in.Used = used
+	if a.dailyLimit > 0 {
+		in.Limit = a.dailyLimit + time.Duration(extensions)*ExtensionStep
+	}
 	a.mu.Lock()
 	for k, v := range a.status {
 		in.Status[k] = v
@@ -181,5 +200,19 @@ func (a *App) Send(ctx context.Context, chat core.Chat, text string) error {
 	if err != nil {
 		return err
 	}
+	if err := a.store.AddUsage(time.Now(), 0, 0, 1, 0); err != nil {
+		a.log.Warn().Err(err).Msg("count sent message")
+	}
 	return a.store.Apply(core.BatchEvent{Platform: chat.Platform, Messages: []core.Message{msg}})
 }
+
+// RecordActive adds time spent with dmz in front of you.
+func (a *App) RecordActive(now time.Time, d time.Duration) error {
+	return a.store.AddUsage(now, d, 0, 0, 0)
+}
+
+// RecordOpen counts one launch of dmz.
+func (a *App) RecordOpen(now time.Time) error { return a.store.AddUsage(now, 0, 1, 0, 0) }
+
+// Extend adds ExtensionStep to today's budget. Extensions show up in dmz stats.
+func (a *App) Extend(now time.Time) error { return a.store.AddUsage(now, 0, 0, 0, 1) }

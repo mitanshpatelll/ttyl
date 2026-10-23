@@ -18,6 +18,7 @@ type Focus struct {
 	ReadReceipts bool     `toml:"read_receipts"`
 	Windows      []string `toml:"windows"`
 	VIP          []string `toml:"vip"`
+	DailyMinutes int      `toml:"daily_minutes"`
 }
 
 const defaultConfig = `# dmz config
@@ -34,6 +35,10 @@ windows = []
 # Phone numbers with country code that bypass delivery windows.
 # Example: vip = ["+15551234567"]
 vip = []
+
+# Daily time budget in minutes (time with dmz focused). 0 = no budget.
+# When it runs out dmz locks; typing "extend" gives 5 more minutes.
+daily_minutes = 0
 `
 
 // Dir returns the data directory ($DMZ_HOME, or ~/Library/Application Support/dmz on macOS),

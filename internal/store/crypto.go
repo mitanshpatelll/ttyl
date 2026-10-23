@@ -17,7 +17,7 @@ import (
 // Empty strings stay empty: queries rely on name != ”.
 const sealedPrefix = "e1:"
 
-var ErrWrongKey = errors.New("the message store key does not match this database (was the Keychain item replaced?); move dmz.db away to start fresh")
+var ErrWrongKey = errors.New("dmz.db was encrypted with a different key (the \"dmz\" Keychain item is missing or was replaced); move dmz.db away to start fresh")
 
 type sealer struct{ aead cipher.AEAD } // nil aead: no key, values stay plaintext
 

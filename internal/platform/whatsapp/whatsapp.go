@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
 	"slices"
 	"strings"
@@ -26,6 +25,7 @@ import (
 	"rsc.io/qr"
 
 	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/dmz/internal/platform"
 )
 
 type Client struct {
@@ -61,6 +61,8 @@ func New(ctx context.Context, dbPath string, log zerolog.Logger) (*Client, error
 	return c, nil
 }
 
+var _ platform.Account = (*Client)(nil)
+
 func (c *Client) ID() core.PlatformID       { return core.WhatsApp }
 func (c *Client) Events() <-chan core.Event { return c.events }
 func (c *Client) LoggedIn() bool            { return c.cli.Store.ID != nil }
@@ -75,7 +77,7 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 // Login links dmz as a new companion device by QR code, drawing each code to w. Blocks until paired.
-func (c *Client) Login(ctx context.Context, w io.Writer) error {
+func (c *Client) Login(ctx context.Context, w platform.Terminal) error {
 	qrs, err := c.cli.GetQRChannel(ctx)
 	if err != nil {
 		return err
@@ -112,6 +114,23 @@ func (c *Client) Login(ctx context.Context, w io.Writer) error {
 			return fmt.Errorf("pairing failed: %s", item.Event)
 		}
 	}
+}
+
+// Logout unlinks dmz from the phone (needs a connection) and deletes the local session either way.
+func (c *Client) Logout(ctx context.Context) error {
+	if !c.LoggedIn() {
+		return nil
+	}
+	if err := c.Connect(ctx); err == nil && c.cli.WaitForConnection(15*time.Second) {
+		if err := c.cli.Logout(ctx); err == nil {
+			return nil
+		}
+	}
+	c.cli.Disconnect()
+	if err := c.cli.Store.Delete(ctx); err != nil {
+		return err
+	}
+	return errors.New("could not reach WhatsApp; local session deleted, also remove dmz under Linked devices on your phone")
 }
 
 // PhoneToChatID turns "+1 555-123-4567" into the DM chat ID "15551234567@s.whatsapp.net".

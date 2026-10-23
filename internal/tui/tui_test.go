@@ -235,3 +235,62 @@ func TestChatSelectionMediaAndPaging(t *testing.T) {
 		t.Errorf("selected message (line %d) not in view [%d, %d)", top, m.chatView.YOffset, m.chatView.YOffset+m.chatView.Height)
 	}
 }
+
+func TestBudgetLockAndExtend(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, _ := rules.New(nil)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(), DailyLimit: time.Minute}, &fakePlatform{})
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = step(t, m, RefreshMsg{})
+	if !strings.Contains(m.View(), "1m left") {
+		t.Errorf("header should show the budget:\n%s", m.View())
+	}
+
+	a.RecordActive(time.Now(), 61*time.Second)
+	m = step(t, m, RefreshMsg{})
+	if !m.inbox.Locked() || !strings.Contains(m.View(), "used up") {
+		t.Fatalf("not locked after the budget:\n%s", m.View())
+	}
+	checkFits(t, m, "lock screen")
+	m = step(t, m, key("/")) // normal keys do nothing while locked
+	if m.focus == focusFilter {
+		t.Error("filter opened while locked")
+	}
+
+	m = step(t, m, key("e"))
+	for _, r := range "nope" {
+		m = step(t, m, key(string(r)))
+	}
+	m = step(t, m, key("enter"))
+	if !m.inbox.Locked() || m.flash == "" {
+		t.Error("wrong word should not unlock")
+	}
+	m = step(t, m, key("e"))
+	for _, r := range "extend" {
+		m = step(t, m, key(string(r)))
+	}
+	m = step(t, m, key("enter"))
+	if m.inbox.Locked() || m.inbox.Limit != time.Minute+app.ExtensionStep {
+		t.Errorf("after extend: locked %v, limit %v", m.inbox.Locked(), m.inbox.Limit)
+	}
+}
+
+func TestActiveTimeIgnoresBlurAndSleep(t *testing.T) {
+	m := Model{focused: true, activeFrom: time.Now().Add(-20 * time.Second)}
+	if d := m.takeActive(time.Now()); d < 19*time.Second || d > 21*time.Second {
+		t.Errorf("focused 20s counted as %v", d)
+	}
+	m.focused, m.activeFrom = false, time.Now().Add(-20*time.Second)
+	if d := m.takeActive(time.Now()); d != 0 {
+		t.Errorf("blurred time counted: %v", d)
+	}
+	m.focused, m.activeFrom = true, time.Now().Add(-time.Hour)
+	if d := m.takeActive(time.Now()); d != 0 {
+		t.Errorf("sleep gap counted: %v", d)
+	}
+}
