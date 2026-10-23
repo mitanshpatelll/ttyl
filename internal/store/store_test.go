@@ -217,3 +217,23 @@ func TestEditsDeletesReactions(t *testing.T) {
 		t.Errorf("reactions = %+v, want %+v", tx.Reactions, want)
 	}
 }
+
+func TestDeleteWithoutChat(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tg := core.Telegram
+	st.Apply(core.BatchEvent{Platform: tg, Messages: []core.Message{
+		{Platform: tg, ChatID: "u1", ID: "7", SenderID: "u1", Timestamp: time.UnixMilli(1), Kind: core.KindText, Body: "a"},
+	}})
+	st.Apply(core.BatchEvent{Platform: wa, Messages: []core.Message{msg("x", "7", false, time.UnixMilli(1))}})
+	st.Apply(core.BatchEvent{Platform: tg, Deletes: []core.MessageRef{{ID: "7"}}})
+	if m, _ := st.Messages(tg, "u1", math.MaxInt64, 10); len(m) != 1 || !m[0].Deleted {
+		t.Errorf("telegram message = %+v", m)
+	}
+	if m, _ := st.Messages(wa, "x", math.MaxInt64, 10); len(m) != 1 || m[0].Deleted {
+		t.Error("delete leaked into another platform")
+	}
+}

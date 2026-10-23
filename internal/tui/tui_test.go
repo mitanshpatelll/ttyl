@@ -294,3 +294,31 @@ func TestActiveTimeIgnoresBlurAndSleep(t *testing.T) {
 		t.Errorf("sleep gap counted: %v", d)
 	}
 }
+
+func TestPlatformBadgesOnlyWhenMixed(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	add := func(p core.PlatformID, chat string) {
+		st.Apply(core.BatchEvent{Platform: p, Chats: []core.Chat{{Platform: p, ID: chat, Name: chat}},
+			Messages: []core.Message{{Platform: p, ChatID: chat, ID: "1", SenderID: chat, Timestamp: time.Now(), Kind: core.KindText, Body: "hi"}}})
+	}
+	r, _ := rules.New(nil)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{})
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 16})
+
+	add(core.WhatsApp, "Mom")
+	m = step(t, m, RefreshMsg{})
+	if strings.Contains(m.viewInbox(30, 10), "WA ") {
+		t.Error("badge shown with a single platform")
+	}
+	add(core.Telegram, "Dev chat")
+	m = step(t, m, RefreshMsg{})
+	if inbox := m.viewInbox(30, 10); !strings.Contains(inbox, "WA ") || !strings.Contains(inbox, "TG ") {
+		t.Errorf("badges missing:\n%s", inbox)
+	}
+	checkFits(t, m, "mixed inbox")
+}

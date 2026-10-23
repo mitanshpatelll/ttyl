@@ -203,13 +203,13 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		}
 	}
 	for _, d := range b.Deletes {
-		// Respect the sender: the content is dropped, not just hidden.
+		// Respect the sender: the content is dropped, not just hidden. Empty ChatID = any chat.
 		if _, err := tx.Exec(`
 			UPDATE messages SET deleted = 1, body = '', meta = '', media = NULL
-			WHERE platform = ? AND chat_id = ? AND id = ?`, p, d.ChatID, d.ID); err != nil {
+			WHERE platform = ?1 AND (chat_id = ?2 OR ?2 = '') AND id = ?3`, p, d.ChatID, d.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`DELETE FROM reactions WHERE platform = ? AND chat_id = ? AND message_id = ?`,
+		if _, err := tx.Exec(`DELETE FROM reactions WHERE platform = ?1 AND (chat_id = ?2 OR ?2 = '') AND message_id = ?3`,
 			p, d.ChatID, d.ID); err != nil {
 			return err
 		}

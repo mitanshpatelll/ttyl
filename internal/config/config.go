@@ -11,8 +11,17 @@ import (
 )
 
 type Config struct {
-	Focus Focus `toml:"focus"`
+	Focus    Focus    `toml:"focus"`
+	Telegram Telegram `toml:"telegram"`
 }
+
+// Telegram needs your own API app: https://my.telegram.org → API development tools.
+type Telegram struct {
+	APIID   int    `toml:"api_id"`
+	APIHash string `toml:"api_hash"`
+}
+
+func (t Telegram) Configured() bool { return t.APIID != 0 && t.APIHash != "" }
 
 type Focus struct {
 	ReadReceipts bool     `toml:"read_receipts"`
@@ -39,6 +48,12 @@ vip = []
 # Daily time budget in minutes (time with dmz focused). 0 = no budget.
 # When it runs out dmz locks; typing "extend" gives 5 more minutes.
 daily_minutes = 0
+
+[telegram]
+# Telegram needs your own API app (free): https://my.telegram.org → API development tools.
+# Then run: dmz login telegram
+api_id = 0
+api_hash = ""
 `
 
 // Dir returns the data directory ($DMZ_HOME, or ~/Library/Application Support/dmz on macOS),

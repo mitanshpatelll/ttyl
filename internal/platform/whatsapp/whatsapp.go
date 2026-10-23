@@ -153,7 +153,7 @@ func (c *Client) Send(ctx context.Context, chatID, text string) (core.Message, e
 	if err != nil {
 		return core.Message{}, err
 	}
-	kind, meta := textKind(text)
+	kind, meta := core.TextKind(text)
 	return core.Message{
 		Platform:  core.WhatsApp,
 		ChatID:    chatID,
@@ -541,11 +541,11 @@ func describe(m *waE2E.Message) (kind core.Kind, body, meta string) {
 	switch {
 	case m == nil:
 	case m.GetConversation() != "":
-		kind, meta = textKind(m.GetConversation())
+		kind, meta = core.TextKind(m.GetConversation())
 		return kind, m.GetConversation(), meta
 	case m.GetExtendedTextMessage() != nil:
 		t := m.GetExtendedTextMessage()
-		kind, meta = textKind(t.GetText())
+		kind, meta = core.TextKind(t.GetText())
 		if t.GetMatchedText() != "" {
 			kind, meta = core.KindLink, t.GetMatchedText()
 		}
@@ -592,15 +592,4 @@ func describe(m *waE2E.Message) (kind core.Kind, body, meta string) {
 	return "", "", ""
 }
 
-func textKind(text string) (core.Kind, string) {
-	for _, f := range strings.Fields(text) {
-		if strings.HasPrefix(f, "https://") || strings.HasPrefix(f, "http://") {
-			return core.KindLink, f
-		}
-	}
-	return core.KindText, ""
-}
-
-func duration(seconds uint32) string {
-	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
-}
+func duration(seconds uint32) string { return core.FormatDuration(int(seconds)) }

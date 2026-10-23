@@ -3,6 +3,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -82,7 +83,8 @@ type ReactionCount struct {
 	Count int
 }
 
-// MessageRef points at a message that may or may not be stored yet.
+// MessageRef points at a message that may or may not be stored yet. An empty ChatID matches
+// the ID in any chat of the platform (Telegram reports DM deletes without the chat).
 type MessageRef struct {
 	ChatID string
 	ID     string
@@ -100,6 +102,21 @@ type Reaction struct {
 	SenderID  string
 	Emoji     string // empty removes the sender's reaction
 	Timestamp time.Time
+}
+
+// TextKind classifies plain text: a link (with its first URL) or text.
+func TextKind(text string) (Kind, string) {
+	for _, f := range strings.Fields(text) {
+		if strings.HasPrefix(f, "https://") || strings.HasPrefix(f, "http://") {
+			return KindLink, f
+		}
+	}
+	return KindText, ""
+}
+
+// FormatDuration renders seconds as m:ss for media placeholders.
+func FormatDuration(seconds int) string {
+	return fmt.Sprintf("%d:%02d", seconds/60, seconds%60)
 }
 
 func (m Message) Sender() string {

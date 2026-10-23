@@ -12,7 +12,14 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/core"
 )
 
-var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp"}
+var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp", core.Telegram: "Telegram", core.Instagram: "Instagram"}
+
+// platformBadges mark each inbox row once chats come from more than one platform.
+var platformBadges = map[core.PlatformID]string{
+	core.WhatsApp:  lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}).Render("WA"),
+	core.Telegram:  lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#0969DA", Dark: "#58A6FF"}).Render("TG"),
+	core.Instagram: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#BF3989", Dark: "#F778BA"}).Render("IG"),
+}
 
 // Sizes: one header line, one footer line, two bordered panes in between.
 func (m Model) leftInnerWidth() int  { return min(max(m.width*34/100, 24), 44) - 2 }
@@ -175,18 +182,31 @@ func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
 	if selected && (m.focus == focusInbox || m.focus == focusFilter) {
 		nameStyle = nameStyle.Foreground(accent)
 	}
-	name := nameStyle.Render(ansi.Truncate(c.Title(), w-2-len(when)-1, "…"))
-
 	badge := ""
-	if c.Unread > 0 {
-		badge = badgeStyle.Render(fmt.Sprint(c.Unread))
+	if m.multiPlatform() {
+		badge = platformBadges[c.Platform] + " "
 	}
-	preview := ansi.Truncate(previewText(c), w-2-lipgloss.Width(badge)-1, "…")
+	name := badge + nameStyle.Render(ansi.Truncate(c.Title(), w-2-lipgloss.Width(badge)-len(when)-1, "…"))
+
+	unread := ""
+	if c.Unread > 0 {
+		unread = badgeStyle.Render(fmt.Sprint(c.Unread))
+	}
+	preview := ansi.Truncate(previewText(c), w-2-lipgloss.Width(unread)-1, "…")
 
 	return []string{
 		spread(marker+name, dimStyle.Render(when), w),
-		spread(marker+dimStyle.Render(preview), badge, w),
+		spread(marker+dimStyle.Render(preview), unread, w),
 	}
+}
+
+func (m Model) multiPlatform() bool {
+	for _, c := range m.inbox.Chats {
+		if c.Platform != m.inbox.Chats[0].Platform {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) viewChat(w, h int) string {

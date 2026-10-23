@@ -15,6 +15,7 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/config"
 	"github.com/mitanshpatelll/dmz/internal/core"
 	"github.com/mitanshpatelll/dmz/internal/platform"
+	"github.com/mitanshpatelll/dmz/internal/platform/telegram"
 	"github.com/mitanshpatelll/dmz/internal/platform/whatsapp"
 	"github.com/mitanshpatelll/dmz/internal/secret"
 	"github.com/mitanshpatelll/dmz/internal/store"
@@ -87,9 +88,19 @@ func (e *env) accounts(ctx context.Context, login core.PlatformID) ([]platform.A
 		return nil, err
 	}
 	accounts := []platform.Account{wa}
-	e.unavailable = map[core.PlatformID]string{
-		core.Telegram:  "not supported yet",
-		core.Instagram: "not supported yet",
+	e.unavailable = map[core.PlatformID]string{core.Instagram: "not supported yet"}
+
+	if tc := e.cfg.Telegram; tc.Configured() {
+		tgClient, err := telegram.New(ctx, telegram.Config{
+			AppID: tc.APIID, AppHash: tc.APIHash, Dir: e.dir, Vault: e.vault, Version: version, Log: e.log,
+		})
+		if err != nil {
+			return nil, err
+		}
+		accounts = append(accounts, tgClient)
+	} else {
+		e.unavailable[core.Telegram] = "add api_id and api_hash from https://my.telegram.org to [telegram] in " +
+			filepath.Join(e.dir, "config.toml")
 	}
 	return accounts, nil
 }
