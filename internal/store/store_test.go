@@ -2,13 +2,18 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mitanshpatelll/dmz/internal/core"
 )
+
+// testKey turns on at-rest encryption so tests cover the sealed path.
+var testKey = make([]byte, 32)
 
 const wa = core.WhatsApp
 
@@ -17,7 +22,7 @@ func msg(chat, id string, fromMe bool, ts time.Time) core.Message {
 }
 
 func TestVisibilityAndUnread(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,29 +100,68 @@ func TestMigratesV01Database(t *testing.T) {
 	if _, err := db.Exec(migrations[0]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO messages (platform, chat_id, id, sender_id, from_me, ts, kind, body) VALUES ('whatsapp', 'c', 'm', 'c', 0, 1, 'text', 'kept')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO chats (platform, id, name) VALUES ('whatsapp', 'c', 'Mom');
+		INSERT INTO messages (platform, chat_id, id, sender_id, from_me, ts, kind, body) VALUES ('whatsapp', 'c', 'm', 'c', 0, 1, 'text', 'kept')`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
 
-	st, err := Open(path)
+	st, err := Open(path, testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	var body string
-	var version, deleted int
-	if err := st.db.QueryRow(`SELECT body, deleted FROM messages WHERE id = 'm'`).Scan(&body, &deleted); err != nil {
+	var rawBody, rawName string
+	var version int
+	st.db.QueryRow(`SELECT body FROM messages WHERE id = 'm'`).Scan(&rawBody)
+	st.db.QueryRow(`SELECT name FROM chats WHERE id = 'c'`).Scan(&rawName)
+	st.db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version != len(migrations) || !strings.HasPrefix(rawBody, sealedPrefix) || !strings.HasPrefix(rawName, sealedPrefix) {
+		t.Errorf("after migration: user_version %d, raw body %q, raw name %q; want v%d and both sealed", version, rawBody, rawName, len(migrations))
+	}
+	chats, _, err := st.Summaries(math.MaxInt64)
+	if err != nil || len(chats) != 1 || chats[0].Name != "Mom" || chats[0].Last.Body != "kept" {
+		t.Errorf("decrypted summaries = %+v, %v", chats, err)
+	}
+}
+
+func TestEncryptionAtRest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	st, err := Open(path, testKey)
+	if err != nil {
 		t.Fatal(err)
 	}
-	st.db.QueryRow(`PRAGMA user_version`).Scan(&version)
-	if body != "kept" || deleted != 0 || version != len(migrations) {
-		t.Errorf("after migration: body %q, deleted %d, user_version %d (want kept, 0, %d)", body, deleted, version, len(migrations))
+	a, b := msg("c", "a", false, time.UnixMilli(1)), msg("c", "b", false, time.UnixMilli(2))
+	a.Body, b.Body = "secret a", "secret b"
+	if err := st.Apply(core.BatchEvent{Platform: wa, Chats: []core.Chat{{Platform: wa, ID: "c", Name: "Mom"}}, Messages: []core.Message{a, b}}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	st.db.QueryRow(`SELECT group_concat(body || sender_name || meta) FROM messages`).Scan(&raw)
+	if strings.Contains(raw, "secret") {
+		t.Errorf("plaintext on disk: %q", raw)
+	}
+	// A ciphertext moved to another row must not decrypt there.
+	if _, err := st.db.Exec(`UPDATE messages SET body = (SELECT body FROM messages WHERE id = 'a') WHERE id = 'b'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Messages(wa, "c", math.MaxInt64, 10); !errors.Is(err, ErrWrongKey) {
+		t.Errorf("swapped ciphertext: err = %v, want ErrWrongKey", err)
+	}
+	st.Close()
+
+	other := make([]byte, 32)
+	other[0] = 1
+	if _, err := Open(path, other); !errors.Is(err, ErrWrongKey) {
+		t.Errorf("wrong key: err = %v, want ErrWrongKey", err)
+	}
+	if _, err := Open(path, nil); err == nil {
+		t.Error("opening an encrypted store without a key should fail")
 	}
 }
 
 func TestEditsDeletesReactions(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}

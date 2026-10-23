@@ -53,7 +53,8 @@ window. The header shows when the next drop is and how many are waiting.
 Everything lives in `~/Library/Application Support/dmz/` (override with `DMZ_HOME`), owner-only:
 
 - `whatsapp.db`: session keys. **Anyone with this file is logged in as you.** Never commit or sync it.
-- `dmz.db`: your messages, decrypted, unencrypted at rest (encryption is planned).
+- `dmz.db`: your messages. Text, names and media handles are encrypted (XChaCha20-Poly1305) with a
+  key kept in the macOS Keychain (service `dmz`). Phone numbers and timestamps are not encrypted.
 - `dmz.log`: logs (`DMZ_DEBUG=1` for verbose).
 
 To log out, remove "dmz" under Linked devices on your phone, or delete `whatsapp.db`.

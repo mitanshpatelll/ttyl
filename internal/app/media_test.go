@@ -16,6 +16,9 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/store"
 )
 
+// testKey turns on at-rest encryption so tests cover the sealed path.
+var testKey = make([]byte, 32)
+
 func TestFileName(t *testing.T) {
 	cases := map[string]string{
 		"report.pdf":         "ABCDEF12-report.pdf",
@@ -40,7 +43,7 @@ func (downloader) Download(context.Context, core.Message, []byte) ([]byte, strin
 }
 
 func TestOpenMedia(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}

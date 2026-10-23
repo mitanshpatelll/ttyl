@@ -56,14 +56,24 @@ var migrations = []string{
 		ts         INTEGER NOT NULL,
 		PRIMARY KEY (platform, chat_id, message_id, sender_id)
 	);`,
+
+	// 3: settings (key check and encryption state)
+	`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 }
 
 type Store struct {
-	db  *sql.DB
-	vip map[core.PlatformID]map[string]bool
+	db     *sql.DB
+	sealer sealer
+	vip    map[core.PlatformID]map[string]bool
 }
 
-func Open(path string) (*Store, error) {
+// Open opens or creates the store. With a 32-byte key, message text, names and media handles
+// are encrypted at rest (see crypto.go); a nil key keeps them in plaintext (tests, opt-out).
+func Open(path string, key []byte) (*Store, error) {
+	sl, err := newSealer(key)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite3", "file:"+path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, err
@@ -76,7 +86,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, vip: map[core.PlatformID]map[string]bool{}}, nil
+	s := &Store{db: db, sealer: sl, vip: map[core.PlatformID]map[string]bool{}}
+	if err := s.initKey(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 func migrate(db *sql.DB) error {
@@ -142,6 +157,7 @@ func (s *Store) Apply(b core.BatchEvent) error {
 	}
 	defer tx.Rollback()
 	p := b.Platform
+	aad := func(chatID, id, col string) []string { return msgAAD(string(p), chatID, id, col) }
 
 	for _, c := range b.Chats {
 		if _, err := tx.Exec(`
@@ -149,7 +165,7 @@ func (s *Store) Apply(b core.BatchEvent) error {
 			ON CONFLICT (platform, id) DO UPDATE SET
 				name = CASE WHEN excluded.name != '' THEN excluded.name ELSE chats.name END,
 				is_group = excluded.is_group`,
-			p, c.ID, c.Name, c.IsGroup, s.vip[p][c.ID]); err != nil {
+			p, c.ID, s.sealer.seal(c.Name, chatAAD(string(p), c.ID)...), c.IsGroup, s.vip[p][c.ID]); err != nil {
 			return err
 		}
 	}
@@ -161,8 +177,10 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		if _, err := tx.Exec(`
 			INSERT INTO messages (platform, chat_id, id, sender_id, sender_name, from_me, ts, kind, body, meta, edited, deleted, media)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-			p, m.ChatID, m.ID, m.SenderID, m.SenderName, m.FromMe, m.Timestamp.UnixMilli(),
-			m.Kind, m.Body, m.Meta, m.Edited, m.Deleted, m.Media); err != nil {
+			p, m.ChatID, m.ID, m.SenderID, s.sealer.seal(m.SenderName, aad(m.ChatID, m.ID, "sender_name")...),
+			m.FromMe, m.Timestamp.UnixMilli(), m.Kind, s.sealer.seal(m.Body, aad(m.ChatID, m.ID, "body")...),
+			s.sealer.seal(m.Meta, aad(m.ChatID, m.ID, "meta")...), m.Edited, m.Deleted,
+			s.sealer.sealBytes(m.Media, aad(m.ChatID, m.ID, "media")...)); err != nil {
 			return err
 		}
 	}
@@ -170,7 +188,8 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		if _, err := tx.Exec(`
 			UPDATE messages SET kind = ?, body = ?, meta = ?, edited = 1
 			WHERE platform = ? AND chat_id = ? AND id = ? AND deleted = 0`,
-			e.Kind, e.Body, e.Meta, p, e.ChatID, e.ID); err != nil {
+			e.Kind, s.sealer.seal(e.Body, aad(e.ChatID, e.ID, "body")...), s.sealer.seal(e.Meta, aad(e.ChatID, e.ID, "meta")...),
+			p, e.ChatID, e.ID); err != nil {
 			return err
 		}
 	}
@@ -223,6 +242,19 @@ func scanMessage(sc interface{ Scan(...any) error }, m *core.Message, extra ...a
 	return nil
 }
 
+// openMessage decrypts a scanned message; Platform, ChatID and ID must be set.
+func (s *Store) openMessage(m *core.Message) (err error) {
+	open := func(v *string, col string) {
+		if err == nil {
+			*v, err = s.sealer.open(*v, msgAAD(string(m.Platform), m.ChatID, m.ID, col)...)
+		}
+	}
+	open(&m.SenderName, "sender_name")
+	open(&m.Body, "body")
+	open(&m.Meta, "meta")
+	return err
+}
+
 // Summaries returns chats that have a visible message, newest first, and the number of held messages.
 func (s *Store) Summaries(cut int64) ([]core.ChatSummary, int, error) {
 	rows, err := s.db.Query(`
@@ -249,6 +281,12 @@ func (s *Store) Summaries(cut int64) ([]core.ChatSummary, int, error) {
 			return nil, 0, err
 		}
 		cs.Last.Platform, cs.Last.ChatID = cs.Platform, cs.ID
+		if err := s.openMessage(&cs.Last); err != nil {
+			return nil, 0, err
+		}
+		if cs.Name, err = s.sealer.open(cs.Name, chatAAD(string(cs.Platform), cs.ID)...); err != nil {
+			return nil, 0, err
+		}
 		out = append(out, cs)
 	}
 	if err := rows.Err(); err != nil {
@@ -297,6 +335,9 @@ func (s *Store) messages(platform core.PlatformID, chatID, filter string, args .
 		if err := scanMessage(rows, &m); err != nil {
 			return nil, err
 		}
+		if err := s.openMessage(&m); err != nil {
+			return nil, err
+		}
 		out = append(out, m)
 	}
 	slices.Reverse(out)
@@ -339,7 +380,10 @@ func (s *Store) Media(platform core.PlatformID, chatID, id string) ([]byte, erro
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return media, err
+	if err != nil {
+		return nil, err
+	}
+	return s.sealer.openBytes(media, msgAAD(string(platform), chatID, id, "media")...)
 }
 
 // MarkRead moves a chat's local read marker forward. It never sends anything to the platform.

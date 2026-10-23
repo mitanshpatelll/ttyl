@@ -17,6 +17,7 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/core"
 	"github.com/mitanshpatelll/dmz/internal/platform/whatsapp"
 	"github.com/mitanshpatelll/dmz/internal/rules"
+	"github.com/mitanshpatelll/dmz/internal/secret"
 	"github.com/mitanshpatelll/dmz/internal/store"
 	"github.com/mitanshpatelll/dmz/internal/tui"
 )
@@ -60,7 +61,12 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	st, err := store.Open(filepath.Join(dir, "dmz.db"))
+	key, keyWhere, err := secret.New(dir).StoreKey()
+	if err != nil {
+		return fmt.Errorf("%w (is the login keychain locked?)", err)
+	}
+	log.Info().Str("key", keyWhere).Msg("message store encrypted at rest")
+	st, err := store.Open(filepath.Join(dir, "dmz.db"), key)
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,9 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/store"
 )
 
+// testKey turns on at-rest encryption so tests cover the sealed path.
+var testKey = make([]byte, 32)
+
 type fakePlatform struct{ sent []string }
 
 func (f *fakePlatform) ID() core.PlatformID           { return core.WhatsApp }
@@ -80,7 +83,7 @@ func key(s string) tea.KeyMsg {
 }
 
 func TestLayoutAndFlow(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +169,7 @@ func (f *fakePlatform) Download(context.Context, core.Message, []byte) ([]byte, 
 }
 
 func TestChatSelectionMediaAndPaging(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
