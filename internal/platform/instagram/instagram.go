@@ -59,13 +59,16 @@ type Client struct {
 	log    zerolog.Logger
 	ctx    context.Context // lifetime of the app, for emit
 
-	mu       sync.Mutex
-	cli      *instameow.Client
-	cancel   context.CancelFunc
-	self     int64
-	users    map[int64]string  // FBID -> display name
-	threads  map[int64]*thread // by thread key
-	byChatID map[string]int64  // chat IGID -> thread key
+	mu         sync.Mutex
+	cli        *instameow.Client
+	connecting bool
+	cancel     context.CancelFunc
+	lastReload time.Time
+	reloading  bool
+	self       int64
+	users      map[int64]string  // FBID -> display name
+	threads    map[int64]*thread // by thread key
+	byChatID   map[string]int64  // chat IGID -> thread key
 }
 
 var _ platform.Account = (*Client)(nil)
@@ -210,21 +213,30 @@ func (c *Client) saveCookies(cli *instameow.Client) error {
 // Connect loads the inbox and opens the live socket in the background.
 func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
-	connected := c.cli != nil
+	busy := c.cli != nil || c.connecting
+	c.connecting = true
 	c.mu.Unlock()
-	if connected {
+	if busy {
 		return nil
+	}
+	done := func() {
+		c.mu.Lock()
+		c.connecting = false
+		c.mu.Unlock()
 	}
 	raw, ok, err := c.cfg.Vault.Get(cookiesKey)
 	if err != nil || !ok {
+		done()
 		return fmt.Errorf("no Instagram cookies: %v", err)
 	}
 	ck := &cookies.Cookies{Platform: types.Instagram}
 	if err := json.Unmarshal([]byte(raw), ck); err != nil {
+		done()
 		return fmt.Errorf("stored Instagram cookies are corrupt: %w", err)
 	}
 	c.status(core.StateConnecting, "")
 	go func() {
+		defer done()
 		cli, mailbox, err := c.open(ctx, ck)
 		if err != nil {
 			c.log.Error().Err(err).Msg("instagram")
@@ -288,8 +300,21 @@ func (c *Client) handleEvent(ctx context.Context, evt slidetypes.ClientEvent) er
 	return nil
 }
 
-// reloadMailbox fetches the inbox again, e.g. when the socket says it lost track.
+// reloadMailbox fetches the inbox again, e.g. when the socket says it lost track. Requests are
+// coalesced: one at a time and at most one a minute, since bursts are what trips Instagram.
 func (c *Client) reloadMailbox(ctx context.Context) {
+	c.mu.Lock()
+	if c.reloading || time.Since(c.lastReload) < time.Minute {
+		c.mu.Unlock()
+		return
+	}
+	c.reloading, c.lastReload = true, time.Now()
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.reloading = false
+		c.mu.Unlock()
+	}()
 	cli, err := c.client()
 	if err != nil {
 		return

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -139,12 +140,22 @@ func runChats(login core.PlatformID) error {
 	}, platforms...)
 	a.CleanMedia()
 	// Consume events before logging in: WhatsApp starts its history sync right after pairing.
-	go a.Run(ctx)
-	defer func() {
+	runDone := make(chan struct{})
+	go func() {
+		a.Run(ctx)
+		close(runDone)
+	}()
+	// Shutdown order matters: stop the platforms (no new events), stop the event loop,
+	// then apply what is still buffered, all before the deferred store close.
+	stop := sync.OnceFunc(func() {
 		for _, acct := range linked {
 			acct.Disconnect()
 		}
-	}()
+		cancel()
+		<-runDone
+		a.Drain()
+	})
+	defer stop()
 
 	for _, acct := range linked {
 		if acct.ID() == login && !acct.LoggedIn() {
@@ -174,7 +185,7 @@ func runChats(login core.PlatformID) error {
 			e.log.Warn().Err(err).Msg("record usage")
 		}
 	}
-	cancel() // stop event handling before disconnecting and closing the store
+	stop()
 	if err != nil && !interrupted {
 		return err
 	}

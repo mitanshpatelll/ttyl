@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,46 @@ func TestFileName(t *testing.T) {
 		if got := fileName("ABCDEF1234567", in); got != want {
 			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
 		}
+	}
+	// Message IDs are chosen by the sender too.
+	for _, id := range []string{"../../x", `..\..\x`, "/etc", ""} {
+		if got := fileName(id, "a.jpg"); strings.ContainsAny(got, `/\`) || strings.HasPrefix(got, ".") {
+			t.Errorf("fileName(%q, a.jpg) = %q escapes the folder", id, got)
+		}
+	}
+	long := fileName("id", "a."+strings.Repeat("x", 300)) // used to panic
+	if n := len([]rune(long)); n > 110 {
+		t.Errorf("long name kept %d runes", n)
+	}
+}
+
+type idlePlatform struct {
+	core.Platform
+	events chan core.Event
+}
+
+func (p idlePlatform) ID() core.PlatformID       { return core.WhatsApp }
+func (p idlePlatform) Events() <-chan core.Event { return p.events }
+
+func TestUnlinkedPlatformAndDrain(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, _ := rules.New(nil)
+	p := idlePlatform{events: make(chan core.Event, 4)}
+	a := New(Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, p)
+
+	// Chats from a platform that is not linked this session stay visible; replying must fail, not panic.
+	if err := a.Send(context.Background(), core.Chat{Platform: core.Instagram, ID: "1"}, "hi"); err == nil || !strings.Contains(err.Error(), "not linked") {
+		t.Errorf("send to unlinked platform: %v", err)
+	}
+
+	p.events <- core.BatchEvent{Platform: core.WhatsApp, Messages: []core.Message{{Platform: core.WhatsApp, ChatID: "c", ID: "1", SenderID: "c", Timestamp: time.Now(), Kind: core.KindText, Body: "late"}}}
+	a.Drain()
+	if in, _ := a.Inbox(time.Now()); len(in.Chats) != 1 || in.Chats[0].Last.Body != "late" {
+		t.Errorf("buffered event not drained: %+v", in.Chats)
 	}
 }
 

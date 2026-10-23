@@ -175,7 +175,7 @@ func (s *Store) Apply(b core.BatchEvent) error {
 			ON CONFLICT (platform, id) DO UPDATE SET
 				name = CASE WHEN excluded.name != '' THEN excluded.name ELSE chats.name END,
 				is_group = excluded.is_group`,
-			p, c.ID, s.sealer.seal(c.Name, chatAAD(string(p), c.ID)...), c.IsGroup, s.vip[p][c.ID]); err != nil {
+			p, c.ID, s.sealer.seal(core.Clean(c.Name), chatAAD(string(p), c.ID)...), c.IsGroup, s.vip[p][c.ID]); err != nil {
 			return err
 		}
 	}
@@ -187,9 +187,9 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		if _, err := tx.Exec(`
 			INSERT INTO messages (platform, chat_id, id, sender_id, sender_name, from_me, ts, kind, body, meta, edited, deleted, media)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-			p, m.ChatID, m.ID, m.SenderID, s.sealer.seal(m.SenderName, aad(m.ChatID, m.ID, "sender_name")...),
-			m.FromMe, m.Timestamp.UnixMilli(), m.Kind, s.sealer.seal(m.Body, aad(m.ChatID, m.ID, "body")...),
-			s.sealer.seal(m.Meta, aad(m.ChatID, m.ID, "meta")...), m.Edited, m.Deleted,
+			p, m.ChatID, m.ID, m.SenderID, s.sealer.seal(core.Clean(m.SenderName), aad(m.ChatID, m.ID, "sender_name")...),
+			m.FromMe, m.Timestamp.UnixMilli(), m.Kind, s.sealer.seal(core.Clean(m.Body), aad(m.ChatID, m.ID, "body")...),
+			s.sealer.seal(core.Clean(m.Meta), aad(m.ChatID, m.ID, "meta")...), m.Edited, m.Deleted,
 			s.sealer.sealBytes(m.Media, aad(m.ChatID, m.ID, "media")...)); err != nil {
 			return err
 		}
@@ -207,7 +207,7 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		if _, err := tx.Exec(`
 			UPDATE messages SET kind = ?, body = ?, meta = ?, edited = 1
 			WHERE platform = ? AND chat_id = ? AND id = ? AND deleted = 0`,
-			e.Kind, s.sealer.seal(e.Body, aad(chatID, e.ID, "body")...), s.sealer.seal(e.Meta, aad(chatID, e.ID, "meta")...),
+			e.Kind, s.sealer.seal(core.Clean(e.Body), aad(chatID, e.ID, "body")...), s.sealer.seal(core.Clean(e.Meta), aad(chatID, e.ID, "meta")...),
 			p, chatID, e.ID); err != nil {
 			return err
 		}
@@ -235,7 +235,7 @@ func (s *Store) Apply(b core.BatchEvent) error {
 				INSERT INTO reactions (platform, chat_id, message_id, sender_id, emoji, ts) VALUES (?, ?, ?, ?, ?, ?)
 				ON CONFLICT (platform, chat_id, message_id, sender_id)
 				DO UPDATE SET emoji = excluded.emoji, ts = excluded.ts WHERE excluded.ts >= reactions.ts`,
-				p, r.ChatID, r.ID, r.SenderID, r.Emoji, ts)
+				p, r.ChatID, r.ID, r.SenderID, core.Clean(r.Emoji), ts)
 		}
 		if err != nil {
 			return err
@@ -243,6 +243,14 @@ func (s *Store) Apply(b core.BatchEvent) error {
 	}
 	for chatID, ts := range b.ReadUpTo {
 		if err := markRead(tx, p, chatID, ts); err != nil {
+			return err
+		}
+	}
+	for chatID, msgID := range b.ReadUpToMessage {
+		if _, err := tx.Exec(`
+			UPDATE chats SET last_read_ts = MAX(last_read_ts, COALESCE(
+				(SELECT ts FROM messages WHERE platform = ?1 AND chat_id = ?2 AND id = ?3), 0))
+			WHERE platform = ?1 AND id = ?2`, p, chatID, msgID); err != nil {
 			return err
 		}
 	}
@@ -261,17 +269,30 @@ func scanMessage(sc interface{ Scan(...any) error }, m *core.Message, extra ...a
 	return nil
 }
 
+// unreadable replaces a value that fails to decrypt. A whole-database key mismatch is caught
+// at Open; a single bad row (corruption, tampering) must not take the inbox down with it.
+const unreadable = "[could not decrypt]"
+
 // openMessage decrypts a scanned message; Platform, ChatID and ID must be set.
-func (s *Store) openMessage(m *core.Message) (err error) {
+func (s *Store) openMessage(m *core.Message) {
 	open := func(v *string, col string) {
-		if err == nil {
-			*v, err = s.sealer.open(*v, msgAAD(string(m.Platform), m.ChatID, m.ID, col)...)
+		plain, err := s.sealer.open(*v, msgAAD(string(m.Platform), m.ChatID, m.ID, col)...)
+		if err != nil {
+			plain = unreadable
 		}
+		*v = core.Clean(plain)
 	}
 	open(&m.SenderName, "sender_name")
 	open(&m.Body, "body")
 	open(&m.Meta, "meta")
-	return err
+}
+
+func (s *Store) openName(platform core.PlatformID, chatID, name string) string {
+	plain, err := s.sealer.open(name, chatAAD(string(platform), chatID)...)
+	if err != nil {
+		return unreadable
+	}
+	return core.Clean(plain)
 }
 
 // Summaries returns chats that have a visible message, newest first, and the number of held messages.
@@ -300,12 +321,8 @@ func (s *Store) Summaries(cut int64) ([]core.ChatSummary, int, error) {
 			return nil, 0, err
 		}
 		cs.Last.Platform, cs.Last.ChatID = cs.Platform, cs.ID
-		if err := s.openMessage(&cs.Last); err != nil {
-			return nil, 0, err
-		}
-		if cs.Name, err = s.sealer.open(cs.Name, chatAAD(string(cs.Platform), cs.ID)...); err != nil {
-			return nil, 0, err
-		}
+		s.openMessage(&cs.Last)
+		cs.Name = s.openName(cs.Platform, cs.ID, cs.Name)
 		out = append(out, cs)
 	}
 	if err := rows.Err(); err != nil {
@@ -354,9 +371,7 @@ func (s *Store) messages(platform core.PlatformID, chatID, filter string, args .
 		if err := scanMessage(rows, &m); err != nil {
 			return nil, err
 		}
-		if err := s.openMessage(&m); err != nil {
-			return nil, err
-		}
+		s.openMessage(&m)
 		out = append(out, m)
 	}
 	slices.Reverse(out)

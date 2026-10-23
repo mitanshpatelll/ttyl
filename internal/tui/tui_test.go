@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -345,5 +346,55 @@ func TestHelpOverlay(t *testing.T) {
 	m = step(t, m, key("?"))
 	if m.help || m.filter.Value() != "?" {
 		t.Error("? while typing a filter must type, not open help")
+	}
+}
+
+type failingPlatform struct{ fakePlatform }
+
+func (f *failingPlatform) Send(context.Context, string, string) (core.Message, error) {
+	return core.Message{}, errors.New("offline")
+}
+
+func TestDraftComesBackOnlyToItsChat(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for _, id := range []string{"a", "b"} {
+		st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: id, Name: id}},
+			Messages: []core.Message{{Platform: core.WhatsApp, ChatID: id, ID: id, SenderID: id, Timestamp: time.Now(), Kind: core.KindText, Body: id}}})
+	}
+	r, _ := rules.New(nil)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &failingPlatform{})
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, key("i"))
+	for _, r := range "hello" {
+		m = step(t, m, key(string(r)))
+	}
+	m = step(t, m, key("enter"))
+	if m.compose.Value() != "hello" || !strings.Contains(m.flash, "offline") {
+		t.Errorf("after failed send: draft %q, flash %q", m.compose.Value(), m.flash)
+	}
+
+	// A failure that arrives after switching chats must not land in the other chat.
+	other := *m.open
+	other.ID = "elsewhere"
+	next, _ := m.Update(sentMsg{chatKey: chatKey(other), text: "stray", err: errors.New("offline")})
+	m = next.(Model)
+	m.compose.Reset()
+	next, _ = m.Update(sentMsg{chatKey: chatKey(other), text: "stray", err: errors.New("offline")})
+	if m = next.(Model); m.compose.Value() != "" {
+		t.Errorf("draft for another chat restored here: %q", m.compose.Value())
+	}
+}
+
+func TestLockedDoesNotLoadChats(t *testing.T) {
+	m := Model{open: &core.Chat{ID: "x"}}
+	m.inbox.Limit, m.inbox.Used = time.Minute, time.Hour
+	if m.loadChat() != nil {
+		t.Error("a locked dmz must not open (and mark read) the chat")
 	}
 }

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,8 @@ func TestMigratesV01Database(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO chats (platform, id, name) VALUES ('whatsapp', 'c', 'Mom');
-		INSERT INTO messages (platform, chat_id, id, sender_id, from_me, ts, kind, body) VALUES ('whatsapp', 'c', 'm', 'c', 0, 1, 'text', 'kept')`); err != nil {
+		INSERT INTO messages (platform, chat_id, id, sender_id, from_me, ts, kind, body) VALUES ('whatsapp', 'c', 'm', 'c', 0, 1, 'text', 'kept');
+		INSERT INTO messages (platform, chat_id, id, sender_id, from_me, ts, kind, body) VALUES ('whatsapp', 'c', 'n', 'c', 0, 2, 'text', 'e1: looks sealed but is not')`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -120,8 +122,11 @@ func TestMigratesV01Database(t *testing.T) {
 		t.Errorf("after migration: user_version %d, raw body %q, raw name %q; want v%d and both sealed", version, rawBody, rawName, len(migrations))
 	}
 	chats, _, err := st.Summaries(math.MaxInt64)
-	if err != nil || len(chats) != 1 || chats[0].Name != "Mom" || chats[0].Last.Body != "kept" {
+	if err != nil || len(chats) != 1 || chats[0].Name != "Mom" || chats[0].Last.Body != "e1: looks sealed but is not" {
 		t.Errorf("decrypted summaries = %+v, %v", chats, err)
+	}
+	if msgs, _ := st.Messages(wa, "c", math.MaxInt64, 10); len(msgs) != 2 || msgs[0].Body != "kept" {
+		t.Errorf("messages after migration = %+v", msgs)
 	}
 }
 
@@ -145,8 +150,9 @@ func TestEncryptionAtRest(t *testing.T) {
 	if _, err := st.db.Exec(`UPDATE messages SET body = (SELECT body FROM messages WHERE id = 'a') WHERE id = 'b'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Messages(wa, "c", math.MaxInt64, 10); !errors.Is(err, ErrWrongKey) {
-		t.Errorf("swapped ciphertext: err = %v, want ErrWrongKey", err)
+	// One bad row shows as unreadable; it must not take the rest of the chat down.
+	if msgs, err := st.Messages(wa, "c", math.MaxInt64, 10); err != nil || msgs[0].Body != "secret a" || msgs[1].Body != unreadable {
+		t.Errorf("swapped ciphertext: %+v, %v", msgs, err)
 	}
 	st.Close()
 
@@ -255,5 +261,40 @@ func TestEditWithoutChat(t *testing.T) {
 	}
 	if m, _ := st.Messages(ig, "9", math.MaxInt64, 10); len(m) != 1 || m[0].Body != "hello" || !m[0].Edited {
 		t.Errorf("after edit: %+v", m)
+	}
+}
+
+func TestCleansControlCharacters(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m := msg("c", "m", false, time.UnixMilli(1))
+	m.Body, m.SenderName = "hi\x1b]52;c;ZXZpbA==\x07 there", "Eve\x1b[2J"
+	st.Apply(core.BatchEvent{Platform: wa, Chats: []core.Chat{{Platform: wa, ID: "c", Name: "\u202eevil"}}, Messages: []core.Message{m}})
+	chats, _, _ := st.Summaries(math.MaxInt64)
+	if got := chats[0]; got.Name != "evil" || got.Last.Body != "hi]52;c;ZXZpbA== there" || got.Last.SenderName != "Eve[2J" {
+		t.Errorf("not cleaned: %q %q %q", got.Name, got.Last.Body, got.Last.SenderName)
+	}
+}
+
+func TestReadUpToMessage(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tg := core.Telegram
+	var msgs []core.Message
+	for i := 1; i <= 3; i++ {
+		msgs = append(msgs, core.Message{Platform: tg, ChatID: "u1", ID: fmt.Sprint(i), SenderID: "u1", Timestamp: time.UnixMilli(int64(i * 1000)), Kind: core.KindText, Body: "x"})
+	}
+	st.Apply(core.BatchEvent{Platform: tg, Messages: msgs})
+	// Read up to message 2 on the phone: message 3 stays unread; an unknown ID changes nothing.
+	st.Apply(core.BatchEvent{Platform: tg, ReadUpToMessage: map[string]string{"u1": "2"}})
+	st.Apply(core.BatchEvent{Platform: tg, ReadUpToMessage: map[string]string{"u1": "999"}})
+	if chats, _, _ := st.Summaries(math.MaxInt64); len(chats) != 1 || chats[0].Unread != 1 {
+		t.Errorf("unread = %+v", chats)
 	}
 }

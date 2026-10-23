@@ -106,7 +106,7 @@ func (s *Store) initKey() error {
 	if err := s.sealPlaintext(); err != nil {
 		return fmt.Errorf("encrypt existing messages: %w", err)
 	}
-	return s.putSetting("sealed", "1")
+	return nil
 }
 
 func (s *Store) sealPlaintext() error {
@@ -118,7 +118,9 @@ func (s *Store) sealPlaintext() error {
 
 	type chatRow struct{ platform, id, name string }
 	var chats []chatRow
-	rows, err := tx.Query(`SELECT platform, id, name FROM chats WHERE name != '' AND name NOT LIKE 'e1:%'`)
+	// Nothing is sealed before this runs once, so every value is plaintext, even one that
+	// happens to start with "e1:". The "sealed" flag commits in the same transaction.
+	rows, err := tx.Query(`SELECT platform, id, name FROM chats WHERE name != ''`)
 	if err != nil {
 		return err
 	}
@@ -159,26 +161,15 @@ func (s *Store) sealPlaintext() error {
 	for _, r := range msgs {
 		aad := func(col string) []string { return msgAAD(r.platform, r.chatID, r.id, col) }
 		if _, err := tx.Exec(`UPDATE messages SET sender_name = ?, body = ?, meta = ?, media = ? WHERE platform = ? AND chat_id = ? AND id = ?`,
-			s.sealIfPlain(r.sender, aad("sender_name")), s.sealIfPlain(r.body, aad("body")), s.sealIfPlain(r.meta, aad("meta")),
-			s.sealBytesIfPlain(r.media, aad("media")), r.platform, r.chatID, r.id); err != nil {
+			s.sealer.seal(r.sender, aad("sender_name")...), s.sealer.seal(r.body, aad("body")...), s.sealer.seal(r.meta, aad("meta")...),
+			s.sealer.sealBytes(r.media, aad("media")...), r.platform, r.chatID, r.id); err != nil {
 			return err
 		}
 	}
+	if _, err := tx.Exec(`INSERT INTO settings (key, value) VALUES ('sealed', '1') ON CONFLICT (key) DO UPDATE SET value = '1'`); err != nil {
+		return err
+	}
 	return tx.Commit()
-}
-
-func (s *Store) sealIfPlain(v string, aad []string) string {
-	if strings.HasPrefix(v, sealedPrefix) {
-		return v
-	}
-	return s.sealer.seal(v, aad...)
-}
-
-func (s *Store) sealBytesIfPlain(b []byte, aad []string) []byte {
-	if b == nil || strings.HasPrefix(string(b), sealedPrefix) {
-		return b
-	}
-	return s.sealer.sealBytes(b, aad...)
 }
 
 func (s *Store) setting(key string) (string, error) {

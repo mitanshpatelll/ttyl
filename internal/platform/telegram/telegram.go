@@ -37,7 +37,8 @@ import (
 const (
 	sessionKey   = "telegram-session"
 	dialogsLimit = 100       // dialogs checked for missed messages on connect
-	historyLimit = 50        // messages fetched per changed dialog
+	historyLimit = 50        // messages per history request
+	historyPages = 10        // pages fetched per chat to fill a gap (first sync: 1)
 	maxDownload  = 200 << 20 // larger attachments are left to the Telegram app
 )
 
@@ -294,8 +295,8 @@ func (c *Client) register(d tg.UpdateDispatcher) {
 	onNew := func(e tg.Entities, m tg.MessageClass) error {
 		c.learnEntities(e)
 		if msg, ok := c.convert(m); ok {
-			c.state.markSeen(msg.ChatID, atoi(msg.ID))
 			c.emit(core.BatchEvent{Platform: core.Telegram, Chats: []core.Chat{c.chat(msg.ChatID)}, Messages: []core.Message{msg}})
+			c.state.markSeen(msg.ChatID, atoi(msg.ID)) // only once it is on its way to the store
 		}
 		return nil
 	}
@@ -317,8 +318,8 @@ func (c *Client) register(d tg.UpdateDispatcher) {
 		c.emit(b)
 		return nil
 	}
-	read := func(chatID string) error {
-		c.emit(core.BatchEvent{Platform: core.Telegram, ReadUpTo: map[string]time.Time{chatID: time.Now()}})
+	read := func(chatID string, maxID int) error {
+		c.emit(core.BatchEvent{Platform: core.Telegram, ReadUpToMessage: map[string]string{chatID: strconv.Itoa(maxID)}})
 		return nil
 	}
 
@@ -338,22 +339,18 @@ func (c *Client) register(d tg.UpdateDispatcher) {
 		return deleted(channelID(u.ChannelID), u.Messages)
 	})
 	d.OnReadHistoryInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadHistoryInbox) error {
-		return read(peerID(u.Peer))
+		return read(peerID(u.Peer), u.MaxID)
 	})
 	d.OnReadChannelInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelInbox) error {
-		return read(channelID(u.ChannelID))
+		return read(channelID(u.ChannelID), u.MaxID)
 	})
 }
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
 // catchUp loads recent dialogs and fetches history for chats with messages dmz hasn't seen.
+// Seen marks are saved when the client stops, after these events have been drained to the store.
 func (c *Client) catchUp(ctx context.Context) {
-	defer func() {
-		if err := c.state.save(); err != nil {
-			c.log.Warn().Err(err).Msg("save telegram state")
-		}
-	}()
 	api, err := c.currentAPI()
 	if err != nil {
 		return
@@ -409,7 +406,9 @@ func (c *Client) catchUp(ctx context.Context) {
 		}
 		msgs, err := c.history(ctx, t.chatID, c.state.seen(t.chatID))
 		if err != nil {
+			// Keep what arrived, but don't move the seen mark: the gap is retried next time.
 			c.log.Warn().Err(err).Str("chat", t.chatID).Msg("telegram history")
+			c.emit(core.BatchEvent{Platform: core.Telegram, Messages: msgs})
 			continue
 		}
 		b := core.BatchEvent{Platform: core.Telegram, Chats: []core.Chat{c.chat(t.chatID)}, Messages: msgs, ReadUpTo: map[string]time.Time{}}
@@ -433,23 +432,62 @@ func (c *Client) history(ctx context.Context, chatID string, minID int) ([]core.
 	if err != nil {
 		return nil, err
 	}
-	res, err := retry(ctx, func() (tg.MessagesMessagesClass, error) {
-		return api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: historyLimit, MinID: minID})
+	raw, err := pageHistory(ctx, minID, func(offsetID int) ([]tg.MessageClass, error) {
+		res, err := retry(ctx, func() (tg.MessagesMessagesClass, error) {
+			return api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: peer, Limit: historyLimit, MinID: minID, OffsetID: offsetID})
+		})
+		if err != nil {
+			return nil, err
+		}
+		page, ok := res.AsModified()
+		if !ok {
+			return nil, nil
+		}
+		c.learnUsers(page.GetUsers())
+		c.learnChats(page.GetChats())
+		return page.GetMessages(), nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	page, ok := res.AsModified()
-	if !ok {
-		return nil, nil
-	}
-	c.learnUsers(page.GetUsers())
-	c.learnChats(page.GetChats())
 	var out []core.Message
-	for _, m := range page.GetMessages() {
+	for _, m := range raw {
 		if msg, ok := c.convert(m); ok {
 			out = append(out, msg)
 		}
+	}
+	return out, err
+}
+
+// pageHistory walks back from the newest message until it reaches minID. Each page holds the
+// newest historyLimit messages older than the offset. A first sync (minID 0) takes one page.
+func pageHistory(ctx context.Context, minID int, fetch func(offsetID int) ([]tg.MessageClass, error)) ([]tg.MessageClass, error) {
+	pages := historyPages
+	if minID == 0 {
+		pages = 1
+	}
+	var out []tg.MessageClass
+	offset := 0
+	for i := 0; i < pages; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return out, ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
+		}
+		msgs, err := fetch(offset)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, msgs...)
+		oldest := 0
+		for _, m := range msgs {
+			if id := m.GetID(); oldest == 0 || id < oldest {
+				oldest = id
+			}
+		}
+		if len(msgs) < historyLimit || oldest <= minID+1 {
+			break
+		}
+		offset = oldest
 	}
 	return out, nil
 }

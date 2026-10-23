@@ -37,7 +37,10 @@ type (
 		msgs    []core.Message
 		err     error
 	}
-	sentMsg  struct{ err error }
+	sentMsg struct {
+		chatKey, text string
+		err           error
+	}
 	mediaMsg struct {
 		path string
 		err  error
@@ -144,8 +147,10 @@ func (m Model) loadInbox() tea.Cmd {
 	}
 }
 
+// loadChat reloads the open chat, which also marks it read (and may send receipts), so it
+// never runs behind the lock screen.
 func (m Model) loadChat() tea.Cmd {
-	if m.open == nil {
+	if m.open == nil || m.inbox.Locked() {
 		return nil
 	}
 	a, chat, limit := m.app, *m.open, m.limit
@@ -162,7 +167,7 @@ func (m Model) send(text string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		return sentMsg{a.Send(ctx, chat, text)}
+		return sentMsg{chatKey(chat), text, a.Send(ctx, chat, text)}
 	}
 }
 
@@ -251,6 +256,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sentMsg:
 		if msg.err != nil {
 			m.flash = "send failed: " + msg.err.Error()
+			// Give the draft back, but only to the chat it was written for.
+			if m.open != nil && chatKey(*m.open) == msg.chatKey && m.compose.Value() == "" {
+				m.compose.SetValue(msg.text)
+				m.compose.CursorEnd()
+			}
 		}
 		return m, tea.Batch(m.loadChat(), m.loadInbox())
 

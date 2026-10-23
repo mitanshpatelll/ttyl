@@ -333,6 +333,12 @@ func (c *Client) fetchGroupName(chatID string) {
 	info, err := c.cli.GetGroupInfo(c.ctx, jid)
 	if err != nil {
 		c.log.Warn().Err(err).Str("chat", chatID).Msg("group info")
+		// Allow another try later rather than on every message of a busy group.
+		time.AfterFunc(10*time.Minute, func() {
+			c.mu.Lock()
+			delete(c.knownGroup, chatID)
+			c.mu.Unlock()
+		})
 		return
 	}
 	c.emit(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: chatID, Name: info.Name, IsGroup: true}}})

@@ -157,6 +157,8 @@ type BatchEvent struct {
 	Deletes   []MessageRef
 	Reactions []Reaction
 	ReadUpTo  map[string]time.Time // chat ID -> read on another device up to this time
+	// ReadUpToMessage is the same, given as the last read message (Telegram reports read IDs).
+	ReadUpToMessage map[string]string
 }
 
 type StatusEvent struct {

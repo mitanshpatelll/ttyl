@@ -170,3 +170,32 @@ func TestExplain(t *testing.T) {
 		t.Error("unknown errors must pass through")
 	}
 }
+
+func TestPageHistoryFillsTheGap(t *testing.T) {
+	// 120 new messages (IDs 31..150) arrived after the last seen ID 30.
+	var requests []int
+	fetch := func(offset int) ([]tg.MessageClass, error) {
+		requests = append(requests, offset)
+		top := 150
+		if offset > 0 {
+			top = offset - 1
+		}
+		var page []tg.MessageClass
+		for id := top; id > 30 && len(page) < historyLimit; id-- {
+			page = append(page, &tg.Message{ID: id})
+		}
+		return page, nil
+	}
+	got, err := pageHistory(context.Background(), 30, fetch)
+	if err != nil || len(got) != 120 {
+		t.Fatalf("got %d messages, %v (requests %v)", len(got), err, requests)
+	}
+	if len(requests) != 3 || requests[0] != 0 || requests[1] != 101 || requests[2] != 51 {
+		t.Errorf("offsets = %v, want [0 101 51]", requests)
+	}
+
+	requests = nil
+	if got, _ := pageHistory(context.Background(), 0, fetch); len(got) != historyLimit || len(requests) != 1 {
+		t.Errorf("first sync fetched %d in %d requests, want one page", len(got), len(requests))
+	}
+}

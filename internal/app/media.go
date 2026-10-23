@@ -57,26 +57,41 @@ func (a *App) OpenMedia(ctx context.Context, msg core.Message) (string, error) {
 	return path, a.reveal(path)
 }
 
-// fileName makes a sender-chosen name safe to write: no directories, no hidden files, bounded length.
+// fileName makes a name safe to write inside the media folder. Both parts are chosen by the
+// sender (WhatsApp message IDs too): no directories, no hidden files, bounded length.
 func fileName(id, name string) string {
-	name = strings.TrimLeft(filepath.Base(strings.ReplaceAll(name, "\\", "/")), ".")
-	name = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == '/' || r == ':' {
-			return '_'
-		}
-		return r
-	}, name)
+	safe := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f || r == '/' || r == '\\' || r == ':' {
+				return '_'
+			}
+			return r
+		}, s)
+	}
+	name = strings.TrimLeft(safe(filepath.Base(strings.ReplaceAll(name, "\\", "/"))), ".")
 	if name == "" {
 		name = "attachment"
+	}
+	if ext := []rune(filepath.Ext(name)); len(ext) > 16 {
+		name = strings.TrimSuffix(name, string(ext)) // an "extension" this long is part of the name
 	}
 	if r := []rune(name); len(r) > 100 {
 		ext := filepath.Ext(name)
 		name = string(r[:100-len([]rune(ext))]) + ext
 	}
-	if len(id) > 8 {
-		id = id[:8]
+	prefix := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, id)
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
 	}
-	return id + "-" + name
+	if prefix == "" {
+		prefix = "msg"
+	}
+	return prefix + "-" + name
 }
 
 // quarantine tags the file like a browser download, so Gatekeeper checks it before anything runs.

@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -90,6 +91,22 @@ func New(o Options, platforms ...core.Platform) *App {
 // Changed fires (coalesced) whenever platform events changed what the UI should show.
 func (a *App) Changed() <-chan struct{} { return a.changed }
 
+// Drain applies events still buffered in the platforms' channels. Call it after the platforms
+// are disconnected and Run has returned, so nothing that was received is lost on quit.
+func (a *App) Drain() {
+	for _, p := range a.platforms {
+		for {
+			select {
+			case evt := <-p.Events():
+				a.handle(evt)
+				continue
+			default:
+			}
+			break
+		}
+	}
+}
+
 // Run consumes events from every platform until ctx ends.
 func (a *App) Run(ctx context.Context) {
 	var wg sync.WaitGroup
@@ -172,13 +189,13 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 // Read receipts are only sent to the platform when enabled in config.
 func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int) ([]core.Message, error) {
 	cut := a.cutoff(now)
-	if a.readReceipts {
+	if p, linked := a.platforms[chat.Platform]; a.readReceipts && linked {
 		unread, err := a.store.Unread(chat.Platform, chat.ID, cut)
 		if err != nil {
 			return nil, err
 		}
 		if len(unread) > 0 {
-			if err := a.platforms[chat.Platform].MarkRead(ctx, chat, unread); err != nil {
+			if err := p.MarkRead(ctx, chat, unread); err != nil {
 				a.log.Warn().Err(err).Str("chat", chat.ID).Msg("send read receipts")
 			}
 		}
@@ -196,7 +213,11 @@ func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int
 }
 
 func (a *App) Send(ctx context.Context, chat core.Chat, text string) error {
-	msg, err := a.platforms[chat.Platform].Send(ctx, chat.ID, text)
+	p, linked := a.platforms[chat.Platform]
+	if !linked { // chats stay in the store after dmz logout without --purge
+		return fmt.Errorf("%s is not linked: dmz login %s", chat.Platform, chat.Platform)
+	}
+	msg, err := p.Send(ctx, chat.ID, text)
 	if err != nil {
 		return err
 	}
