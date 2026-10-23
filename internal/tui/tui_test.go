@@ -10,10 +10,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rs/zerolog"
 
 	"github.com/mitanshpatelll/dmz/internal/app"
+	"github.com/mitanshpatelll/dmz/internal/cellwidth"
 	"github.com/mitanshpatelll/dmz/internal/core"
 	"github.com/mitanshpatelll/dmz/internal/rules"
 	"github.com/mitanshpatelll/dmz/internal/store"
@@ -159,7 +159,7 @@ func checkFits(t *testing.T, m Model, label string) {
 		t.Errorf("%s: %d lines, want %d", label, len(lines), m.height)
 	}
 	for i, l := range lines {
-		if w := lipgloss.Width(l); w > m.width {
+		if w := cellwidth.String(l); w != m.width {
 			t.Errorf("%s: line %d is %d wide, max %d: %q", label, i, w, m.width, l)
 		}
 	}

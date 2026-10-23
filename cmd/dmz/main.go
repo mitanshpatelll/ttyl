@@ -18,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mitanshpatelll/dmz/internal/app"
+	"github.com/mitanshpatelll/dmz/internal/cellwidth"
 	"github.com/mitanshpatelll/dmz/internal/config"
 	"github.com/mitanshpatelll/dmz/internal/core"
 	"github.com/mitanshpatelll/dmz/internal/platform"
@@ -171,6 +172,13 @@ func runChats(login core.PlatformID) error {
 
 	if err := a.RecordOpen(time.Now()); err != nil {
 		e.log.Warn().Err(err).Msg("record open")
+	}
+	// Measure how this terminal draws Gujarati, Hindi and emoji before laying anything out.
+	if model, widths, err := cellwidth.Calibrate(os.Stdin, os.Stdout, 300*time.Millisecond); err != nil {
+		e.log.Warn().Err(err).Msg("terminal width probe failed; using Unicode widths")
+	} else {
+		cellwidth.Set(model)
+		e.log.Info().Interface("probe", widths).Interface("model", model).Msg("terminal widths")
 	}
 	p := tea.NewProgram(tui.New(a), tea.WithAltScreen(), tea.WithReportFocus(), tea.WithContext(ctx))
 	go func() {

@@ -64,6 +64,19 @@ func gallery(t *testing.T, width, height int) {
 		},
 		ReadUpTo: map[string]time.Time{"mom": ago(25), "trip": ago(60)},
 	})
+	st.Apply(core.BatchEvent{Platform: wa,
+		Chats: []core.Chat{
+			{Platform: wa, ID: "jay", Name: "જય વિર જય જોગમાયા", IsGroup: true},
+			{Platform: wa, ID: "sem", Name: "📚 Semester 7 - B.E. Computer Engg", IsGroup: true},
+			{Platform: wa, ID: "919825011420@s.whatsapp.net", Name: "Papa"},
+		},
+		Messages: []core.Message{
+			msg(wa, "jay", "j1", "rk", "Rakesh Patel", false, ago(60*30), "જય માતાજી 🙏 કાલે સવારે આરતી છે"),
+			msg(wa, "sem", "s1", "ap", "Er. Arpita A. Prajapati", false, ago(60*3), "📢 **તમામ વિદ્યાર્થીઓ** submit the assignment by Friday 🇮🇳"),
+			msg(wa, "919825011420@s.whatsapp.net", "p1", "me", "", true, ago(60*5), "Su karvu che 👨‍👩‍👧 ☺️ 👍🏽"),
+		},
+		ReadUpTo: map[string]time.Time{"jay": now, "sem": now, "919825011420@s.whatsapp.net": now},
+	})
 	st.Apply(core.BatchEvent{Platform: tg, Chats: []core.Chat{{Platform: tg, ID: "u1", Name: "Dev chat", IsGroup: true}},
 		Messages: []core.Message{msg(tg, "u1", "1", "u2", "Sam", false, ago(90), "deploy is green ✅")}, ReadUpTo: map[string]time.Time{"u1": now}})
 

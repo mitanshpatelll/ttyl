@@ -37,7 +37,7 @@ var (
 	accentStyle = lipgloss.NewStyle().Foreground(accent)
 	tagStyle    = lipgloss.NewStyle().Foreground(accent).Italic(true)
 	errorStyle  = lipgloss.NewStyle().Foreground(red)
-	keyStyle    = lipgloss.NewStyle().Foreground(text).Bold(true)
+	keyStyle    = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	logoStyle   = lipgloss.NewStyle().Bold(true).Foreground(white).Background(accent).Padding(0, 1)
 	badgeStyle  = lipgloss.NewStyle().Bold(true).Foreground(white).Background(accent).Padding(0, 1)
 )
@@ -53,30 +53,32 @@ func senderStyle(id string) lipgloss.Style {
 	return lipgloss.NewStyle().Bold(true).Foreground(personColor(id))
 }
 
-// avatar is a three-cell colored block with the chat's initials.
-func avatar(id, name string) string {
-	return lipgloss.NewStyle().Width(3).Align(lipgloss.Center).Bold(true).
-		Foreground(white).Background(personColor(id)).Render(initials(name))
-}
-
-// initials: "Weekend trip" → "WT", "Mom" → "M", "+15551234" → "#".
-func initials(name string) string {
+// initialsOf: "Weekend trip" → "WT", "Mummy" → "MU", "+15551234" → "#". Scripts without
+// capitals (Gujarati, Hindi) give one letter per word.
+func initialsOf(name string) string {
 	var out []rune
+	var first []rune // the word the first initial came from
 	for _, word := range strings.Fields(name) {
-		r := []rune(word)[0]
-		if !unicode.IsLetter(r) {
-			if len(out) == 0 && (r == '+' || unicode.IsDigit(r)) {
+		letters := []rune(word)
+		if !unicode.IsLetter(letters[0]) {
+			if len(out) == 0 && (letters[0] == '+' || unicode.IsDigit(letters[0])) {
 				return "#"
 			}
 			continue
 		}
-		out = append(out, unicode.ToUpper(r))
+		if first == nil {
+			first = letters
+		}
+		out = append(out, unicode.ToUpper(letters[0]))
 		if len(out) == 2 {
-			break
+			return string(out)
 		}
 	}
 	if len(out) == 0 {
 		return "?"
+	}
+	if len(first) > 1 && unicode.IsLetter(first[1]) && unicode.ToUpper(first[1]) != unicode.ToLower(first[1]) {
+		out = append(out, unicode.ToUpper(first[1]))
 	}
 	return string(out)
 }

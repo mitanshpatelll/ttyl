@@ -77,6 +77,7 @@ type Model struct {
 
 	bubbles     map[string][]string // rendered bubbles, keyed by content and state
 	bubbleWidth int
+	chatContent []string // every line of the open chat; the viewport tracks the scroll position
 
 	filter  textinput.Model
 	compose textinput.Model
@@ -581,11 +582,11 @@ func (m *Model) scrollInbox() {
 
 // layout resizes the inner components after a window or mode change.
 func (m *Model) layout() {
-	rw, ih := m.rightInnerWidth(), m.innerHeight()
+	rw := m.rightW()
 	m.chatView.Width = rw
-	m.chatView.Height = max(1, ih-2) // divider and composer below
-	m.compose.Width = max(1, rw-5)
-	m.filter.Width = max(1, m.leftInnerWidth()-5)
+	m.chatView.Height = max(1, m.bodyH()-composerH)
+	m.compose.Width = max(1, rw-9)
+	m.filter.Width = max(1, m.leftW()-14)
 	m.renderChat()
 	m.showSelected()
 	m.scrollInbox()

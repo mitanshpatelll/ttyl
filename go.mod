@@ -10,9 +10,11 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/gotd/log v0.1.0
 	github.com/gotd/td v0.163.0
+	github.com/mattn/go-runewidth v0.0.27
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/muesli/termenv v0.16.0
+	github.com/rivo/uniseg v0.4.7
 	github.com/rs/zerolog v1.35.1
 	github.com/zalando/go-keyring v0.2.8
 	go.mau.fi/mautrix-meta v0.2610.0
@@ -65,7 +67,6 @@ require (
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
-	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/ogen-go/ogen v1.23.0 // indirect
@@ -73,7 +74,6 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.61.0 // indirect
 	github.com/refraction-networking/utls v1.8.2 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
