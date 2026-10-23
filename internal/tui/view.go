@@ -44,6 +44,9 @@ func (m Model) View() string {
 	if m.inbox.Locked() {
 		return m.viewLocked()
 	}
+	if m.help {
+		return m.viewHelp()
+	}
 	lw, rw, ih := m.leftInnerWidth(), m.rightInnerWidth(), m.innerHeight()
 	left := paneStyle(m.focus == focusInbox || m.focus == focusFilter).Width(lw).Height(ih).Render(m.viewInbox(lw, ih))
 	right := paneStyle(m.focus == focusChat || m.focus == focusCompose).Width(rw).Height(ih).Render(m.viewChat(rw, ih))
@@ -95,6 +98,29 @@ func minutes(d time.Duration) string {
 	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
+var helpSections = []struct {
+	title string
+	keys  [][2]string
+}{
+	{"Inbox", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "filter by name"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
+	{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to inbox"}}},
+	{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
+	{"Anywhere", [][2]string{{"?", "this help"}, {"q", "quit (outside text input)"}, {"ctrl+c", "quit"}}},
+}
+
+func (m Model) viewHelp() string {
+	var b strings.Builder
+	b.WriteString(boldStyle.Render("dmz keys") + "\n")
+	for _, sec := range helpSections {
+		b.WriteString("\n" + accentStyle.Render(sec.title) + "\n")
+		for _, k := range sec.keys {
+			b.WriteString(fmt.Sprintf("  %-10s %s\n", k[0], dimStyle.Render(k[1])))
+		}
+	}
+	b.WriteString("\n" + dimStyle.Render("any key to close · dmz stats in a shell for your week"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
+}
+
 func (m Model) viewLocked() string {
 	body := []string{
 		boldStyle.Render("Today's dmz time is used up"),
@@ -140,9 +166,9 @@ func (m Model) viewFooter() string {
 	case focusCompose:
 		hints = "enter send · esc stop typing"
 	case focusChat:
-		hints = "j/k select · o open media · i reply · esc inbox · q quit"
+		hints = "j/k select · o open media · i reply · esc inbox · ? help"
 	default:
-		hints = "j/k move · enter open · i reply · / filter · tab chat · q quit"
+		hints = "j/k move · enter open · i reply · / filter · ? help · q quit"
 	}
 	status := errorStyle.Render(m.flash)
 	if m.flash == "" {

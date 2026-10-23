@@ -15,6 +15,7 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/config"
 	"github.com/mitanshpatelll/dmz/internal/core"
 	"github.com/mitanshpatelll/dmz/internal/platform"
+	"github.com/mitanshpatelll/dmz/internal/platform/instagram"
 	"github.com/mitanshpatelll/dmz/internal/platform/telegram"
 	"github.com/mitanshpatelll/dmz/internal/platform/whatsapp"
 	"github.com/mitanshpatelll/dmz/internal/secret"
@@ -87,8 +88,8 @@ func (e *env) accounts(ctx context.Context, login core.PlatformID) ([]platform.A
 	if err := e.store.SetVIP(core.WhatsApp, vip); err != nil {
 		return nil, err
 	}
-	accounts := []platform.Account{wa}
-	e.unavailable = map[core.PlatformID]string{core.Instagram: "not supported yet"}
+	accounts := []platform.Account{wa, instagram.New(ctx, instagram.Config{Vault: e.vault, Log: e.log})}
+	e.unavailable = map[core.PlatformID]string{}
 
 	if tc := e.cfg.Telegram; tc.Configured() {
 		tgClient, err := telegram.New(ctx, telegram.Config{

@@ -6,6 +6,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -194,11 +195,20 @@ func (s *Store) Apply(b core.BatchEvent) error {
 		}
 	}
 	for _, e := range b.Edits {
+		chatID := e.ChatID
+		if chatID == "" { // Instagram edits name only the message; find its chat for the associated data
+			err := tx.QueryRow(`SELECT chat_id FROM messages WHERE platform = ? AND id = ?`, p, e.ID).Scan(&chatID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(`
 			UPDATE messages SET kind = ?, body = ?, meta = ?, edited = 1
 			WHERE platform = ? AND chat_id = ? AND id = ? AND deleted = 0`,
-			e.Kind, s.sealer.seal(e.Body, aad(e.ChatID, e.ID, "body")...), s.sealer.seal(e.Meta, aad(e.ChatID, e.ID, "meta")...),
-			p, e.ChatID, e.ID); err != nil {
+			e.Kind, s.sealer.seal(e.Body, aad(chatID, e.ID, "body")...), s.sealer.seal(e.Meta, aad(chatID, e.ID, "meta")...),
+			p, chatID, e.ID); err != nil {
 			return err
 		}
 	}

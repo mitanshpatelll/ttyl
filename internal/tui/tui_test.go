@@ -322,3 +322,28 @@ func TestPlatformBadgesOnlyWhenMixed(t *testing.T) {
 	}
 	checkFits(t, m, "mixed inbox")
 }
+
+func TestHelpOverlay(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, _ := rules.New(nil)
+	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = step(t, m, key("?"))
+	if !strings.Contains(m.View(), "open attachment") {
+		t.Fatalf("help not shown:\n%s", m.View())
+	}
+	checkFits(t, m, "help")
+	m = step(t, m, key("j"))
+	if m.help {
+		t.Error("any key should close help")
+	}
+	m = step(t, m, key("/"))
+	m = step(t, m, key("?"))
+	if m.help || m.filter.Value() != "?" {
+		t.Error("? while typing a filter must type, not open help")
+	}
+}

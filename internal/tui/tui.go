@@ -75,6 +75,8 @@ type Model struct {
 	focused    bool      // terminal has focus; only focused time counts toward the budget
 	activeFrom time.Time // start of the focused time not yet recorded
 
+	help bool // ? overlay
+
 	flash string // last error, cleared on the next key press
 	note  string // last info message, cleared on the next key press
 }
@@ -324,6 +326,11 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.inbox.Locked() {
 		return m.handleLockedKey(k)
+	}
+	typing := m.focus == focusCompose || m.focus == focusFilter
+	if m.help || (k.String() == "?" && !typing) {
+		m.help = !m.help && k.String() == "?" // any key closes it
+		return m, nil
 	}
 	var cmd tea.Cmd
 

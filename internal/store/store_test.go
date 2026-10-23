@@ -237,3 +237,23 @@ func TestDeleteWithoutChat(t *testing.T) {
 		t.Error("delete leaked into another platform")
 	}
 }
+
+func TestEditWithoutChat(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ig := core.Instagram
+	st.Apply(core.BatchEvent{Platform: ig, Messages: []core.Message{{Platform: ig, ChatID: "9", ID: "mid.a", SenderID: "2", Timestamp: time.UnixMilli(1), Kind: core.KindText, Body: "helo"}}})
+	err = st.Apply(core.BatchEvent{Platform: ig, Edits: []core.Edit{
+		{MessageRef: core.MessageRef{ID: "mid.a"}, Kind: core.KindText, Body: "hello"},
+		{MessageRef: core.MessageRef{ID: "mid.unknown"}, Kind: core.KindText, Body: "ignored"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := st.Messages(ig, "9", math.MaxInt64, 10); len(m) != 1 || m[0].Body != "hello" || !m[0].Edited {
+		t.Errorf("after edit: %+v", m)
+	}
+}
