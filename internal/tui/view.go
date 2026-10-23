@@ -13,22 +13,33 @@ import (
 )
 
 // Every width below goes through cellwidth, which knows how this terminal draws Gujarati,
-// Hindi or emoji. Lines are assembled cell by cell so a wide name can't push a border.
+// Hindi or emoji. Lines are assembled cell by cell so a wide name can't push anything.
 
 var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp", core.Telegram: "Telegram", core.Instagram: "Instagram"}
 
-// Layout: one frame. Top border with the status, column headers, a rule, the inbox and chat
-// columns, a rule, the key hints, the bottom border.
-func (m Model) leftW() int  { return min(max(m.width*30/100, 30), 44) }
-func (m Model) rightW() int { return max(20, m.width-m.leftW()-3) }
-func (m Model) bodyH() int  { return max(3, m.height-6) }
+// Layout, Discord style: a shaded sidebar on the left, the conversation on the right, no
+// boxes. Row 0 is the top bar, row 1 headings and a rule, then the body, then key hints.
+func (m Model) leftW() int  { return min(max(m.width*30/100, 32), 44) }
+func (m Model) rightW() int { return max(20, m.width-m.leftW()) }
+func (m Model) bodyH() int  { return max(3, m.height-3) } // minus top bar, headings, key hints
 
 func (m Model) filterShown() bool { return m.focus == focusFilter || m.filter.Value() != "" }
 
-// rows is how many inbox entries fit: two lines each plus a spacer.
-func (m Model) rows() int { return max(1, (m.bodyH()+1)/3) }
+// rows is how many inbox entries fit: two lines each.
+func (m Model) rows() int { return max(1, m.bodyH()/2) }
 
-func border(s string) string { return lipgloss.NewStyle().Foreground(subtle).Render(s) }
+// on paints a background under a style, so a whole shaded area stays shaded between segments.
+func on(bg lipgloss.TerminalColor) func(lipgloss.Style) lipgloss.Style {
+	return func(s lipgloss.Style) lipgloss.Style { return s.Background(bg) }
+}
+
+// fill pads a line to w cells with spaces in the given background.
+func fill(line string, w int, bg lipgloss.TerminalColor) string {
+	if lw := cw.String(line); lw < w {
+		return line + lipgloss.NewStyle().Background(bg).Render(strings.Repeat(" ", w-lw))
+	}
+	return cw.Truncate(line, w, "")
+}
 
 func (m Model) View() string {
 	if m.width == 0 {
@@ -40,44 +51,60 @@ func (m Model) View() string {
 	if m.help {
 		return m.viewHelp()
 	}
-	w, lw, rw, bh := m.width, m.leftW(), m.rightW(), m.bodyH()
+	lw, rw, bh := m.leftW(), m.rightW(), m.bodyH()
 	left, right := m.inboxLines(lw, bh), m.chatLines(rw, bh)
 
 	out := make([]string, 0, m.height)
-	out = append(out, m.topBorder(w))
-	out = append(out, border("│")+cw.Pad(m.inboxHeader(lw), lw)+border("│")+cw.Pad(m.chatHeader(rw), rw)+border("│"))
-	out = append(out, border("├"+strings.Repeat("─", lw)+"┼"+strings.Repeat("─", rw)+"┤"))
+	out = append(out, m.sidebarTop(lw)+cw.Pad(m.chatHeader(rw), rw))
+	out = append(out, m.inboxHeader(lw)+dimStyle.Render(strings.Repeat("─", rw)))
 	for i := range bh {
-		out = append(out, border("│")+cw.Pad(left[i], lw)+border("│")+cw.Pad(right[i], rw)+border("│"))
+		out = append(out, left[i]+cw.Pad(right[i], rw))
 	}
-	out = append(out, border("├"+strings.Repeat("─", lw)+"┴"+strings.Repeat("─", rw)+"┤"))
-	out = append(out, border("│")+cw.Pad(m.footer(w-2), w-2)+border("│"))
-	out = append(out, border("╰"+strings.Repeat("─", w-2)+"╯"))
+	out = append(out, cw.Pad(m.footer(m.width), m.width))
 	return strings.Join(out, "\n")
 }
 
-// topBorder carries the app name, a dot per platform, and only unusual state on the right.
-func (m Model) topBorder(w int) string {
-	left := " " + accentStyle.Bold(true).Render("dmz")
+// sidebarTop is the app name and a dot per platform, on the sidebar shade.
+func (m Model) sidebarTop(w int) string {
+	bg := on(sidebarBg)
+	line := bg(lipgloss.NewStyle()).Render(" ") + bg(accentStyle.Bold(true)).Render("dmz")
 	ids := make([]core.PlatformID, 0, len(m.inbox.Status))
 	for id := range m.inbox.Status {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
-		left += "  " + statusText(platformTags[id], m.inbox.Status[id])
+		line += bg(lipgloss.NewStyle()).Render("  ") + statusText(platformTags[id], m.inbox.Status[id], sidebarBg)
 		if p := m.inbox.Sync[id]; p > 0 && p < 100 {
-			left += dimStyle.Render(fmt.Sprintf(" syncing %d%%", p))
+			line += bg(dimStyle).Render(fmt.Sprintf(" %d%%", p))
 		}
 	}
-	left += " "
+	return fill(line, w, sidebarBg)
+}
 
-	var right []string
+func statusText(name string, s core.StatusEvent, bg lipgloss.TerminalColor) string {
+	style := func(c lipgloss.TerminalColor) lipgloss.Style { return lipgloss.NewStyle().Foreground(c).Background(bg) }
+	switch s.State {
+	case core.StateConnected:
+		return style(green).Render("●") + style(faint).Render(" "+name)
+	case core.StateLoggedOut:
+		return style(red).Render("● " + name + " logged out")
+	}
+	detail := "connecting"
+	if s.Detail != "" {
+		detail = s.Detail
+	}
+	return style(yellow).Render("●") + style(faint).Render(" "+name+" ") + style(yellow).Render(detail)
+}
+
+// statusRight is only what differs from normal: held messages, the budget, receipts on.
+func (m Model) statusRight() string {
+	var parts []string
 	if !m.inbox.Next.IsZero() {
 		if m.inbox.Held > 0 {
-			right = append(right, lipgloss.NewStyle().Foreground(yellow).Render(fmt.Sprintf("%d held · next %s", m.inbox.Held, m.inbox.Next.Format("15:04"))))
+			parts = append(parts, lipgloss.NewStyle().Foreground(yellow).Render(fmt.Sprintf("%d held · next %s", m.inbox.Held, m.inbox.Next.Format("15:04"))))
 		} else {
-			right = append(right, dimStyle.Render("next drop "+m.inbox.Next.Format("15:04")))
+			parts = append(parts, dimStyle.Render("next drop "+m.inbox.Next.Format("15:04")))
 		}
 	}
 	if m.inbox.Limit > 0 {
@@ -86,37 +113,15 @@ func (m Model) topBorder(w int) string {
 		if remaining <= 5*time.Minute {
 			style = lipgloss.NewStyle().Foreground(yellow)
 		}
-		right = append(right, style.Render(minutes(remaining)+" left"))
+		parts = append(parts, style.Render(minutes(remaining)+" left"))
 	}
 	if m.inbox.Receipts {
-		right = append(right, lipgloss.NewStyle().Foreground(yellow).Render("read receipts on"))
+		parts = append(parts, lipgloss.NewStyle().Foreground(yellow).Render("read receipts on"))
 	}
-	r := ""
-	if len(right) > 0 {
-		r = " " + strings.Join(right, border(" │ ")) + " "
+	if len(parts) == 0 {
+		return ""
 	}
-	fill := w - 4 - cw.String(left) - cw.String(r)
-	if fill < 1 {
-		r = ""
-		left = cw.Truncate(left, max(0, w-5), "… ")
-		fill = max(0, w-4-cw.String(left))
-	}
-	return border("╭─") + left + border(strings.Repeat("─", fill)) + r + border("─╮")
-}
-
-func statusText(name string, s core.StatusEvent) string {
-	dot := func(c lipgloss.AdaptiveColor) string { return lipgloss.NewStyle().Foreground(c).Render("●") }
-	switch s.State {
-	case core.StateConnected:
-		return dot(green) + " " + dimStyle.Render(name)
-	case core.StateLoggedOut:
-		return dot(red) + " " + lipgloss.NewStyle().Foreground(red).Render(name+" logged out")
-	}
-	detail := "connecting"
-	if s.Detail != "" {
-		detail = s.Detail
-	}
-	return dot(yellow) + " " + dimStyle.Render(name+" ") + lipgloss.NewStyle().Foreground(yellow).Render(detail)
+	return strings.Join(parts, dimStyle.Render("  ·  ")) + " "
 }
 
 func minutes(d time.Duration) string {
@@ -134,9 +139,9 @@ func (m Model) footer(w int) string {
 	case focusCompose:
 		hints = keyHints("enter", "send", "esc", "stop typing")
 	case focusChat:
-		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "esc", "inbox", "?", "help")
+		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "esc", "back", "?", "help")
 	default:
-		hints = keyHints("j/k", "move", "enter", "chat", "i", "reply", "/", "search", "?", "help", "q", "quit")
+		hints = keyHints("j/k", "move", "enter", "open", "i", "reply", "/", "search", "?", "help", "q", "quit")
 	}
 	status := errorStyle.Render(m.flash)
 	if m.flash == "" {
@@ -186,8 +191,7 @@ func (m Model) viewLocked() string {
 	return m.centered(panel("Time's up", "", body, 60, len(body)+3, true, -1))
 }
 
-// panel draws a rounded box of w×h cells with the title set into the top border. A divider
-// index >= 0 turns that body line into a ├──┤ rule.
+// panel draws a rounded box of w×h cells with the title set into the top border (popups only).
 func panel(title, right string, body []string, w, h int, active bool, divider int) string {
 	b := lipgloss.NewStyle().Foreground(subtle)
 	titleStyle := boldStyle
@@ -201,13 +205,13 @@ func panel(title, right string, body []string, w, h int, active bool, divider in
 	if right != "" {
 		r = " " + right + " "
 	}
-	fill := w - 3 - cw.String(t) - cw.String(r)
-	if fill < 1 {
+	gap := w - 3 - cw.String(t) - cw.String(r)
+	if gap < 1 {
 		r = ""
 		t = cw.Truncate(t, max(0, w-4), "… ")
-		fill = max(0, w-3-cw.String(t))
+		gap = max(0, w-3-cw.String(t))
 	}
-	lines := []string{b.Render("╭─") + t + b.Render(strings.Repeat("─", fill)) + r + b.Render("╮")}
+	lines := []string{b.Render("╭─") + t + b.Render(strings.Repeat("─", gap)) + r + b.Render("╮")}
 	for i := 0; i < h-2; i++ {
 		if i == divider {
 			lines = append(lines, b.Render("├"+strings.Repeat("─", inner)+"┤"))
@@ -268,6 +272,17 @@ func shortTime(t, now time.Time) string {
 	return t.Format("02/01/06")
 }
 
+// stamp is the time in a message header: "Today at 17:15".
+func stamp(t, now time.Time) string {
+	switch {
+	case sameDay(t, now):
+		return "Today at " + t.Format("15:04")
+	case sameDay(t, now.AddDate(0, 0, -1)):
+		return "Yesterday at " + t.Format("15:04")
+	}
+	return t.Format("02/01/2006 15:04")
+}
+
 func dayLabel(t, now time.Time) string {
 	switch {
 	case sameDay(t, now):
@@ -275,7 +290,7 @@ func dayLabel(t, now time.Time) string {
 	case sameDay(t, now.AddDate(0, 0, -1)):
 		return "Yesterday"
 	}
-	return t.Format("Mon, 02 Jan 2006")
+	return t.Format("Monday, 02 January 2006")
 }
 
 func sameDay(a, b time.Time) bool {

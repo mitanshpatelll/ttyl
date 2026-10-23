@@ -208,7 +208,7 @@ func TestChatSelectionMediaAndPaging(t *testing.T) {
 		t.Fatalf("loaded %d, sel %d", len(m.messages), m.sel)
 	}
 	view := m.View()
-	for _, want := range []string{"[photo]", "[deleted]", "edited", "👍", "▌", "┏"} {
+	for _, want := range []string{"[photo]", "[message deleted]", "(edited)", "👍", "▌"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("chat view missing %q:\n%s", want, view)
 		}
@@ -422,7 +422,7 @@ func TestOpeningJumpsToFirstUnread(t *testing.T) {
 	if m.messages[m.sel].ID != "30" {
 		t.Errorf("selected %q, want the first unread (30)", m.messages[m.sel].ID)
 	}
-	if !strings.Contains(m.View(), "10 new messages") {
+	if !strings.Contains(m.View(), " NEW ") {
 		t.Errorf("divider not in view:\n%s", m.View())
 	}
 	checkFits(t, m, "jump to unread")

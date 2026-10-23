@@ -8,28 +8,32 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Palette. Every color adapts to light and dark terminals.
+// Palette. Every color adapts to light and dark terminals. Areas are told apart by shade,
+// not by boxes: the sidebar, the selected row and the message input each have a background.
 var (
 	accent     = lipgloss.AdaptiveColor{Light: "#5B4CDB", Dark: "#A79BFF"}
 	accentSoft = lipgloss.AdaptiveColor{Light: "#8C82E6", Dark: "#6E63C9"}
-	text       = lipgloss.AdaptiveColor{Light: "#1F1F24", Dark: "#E6E6EB"}
-	faint      = lipgloss.AdaptiveColor{Light: "#7A7A85", Dark: "#7C7C88"}
-	subtle     = lipgloss.AdaptiveColor{Light: "#D5D5DE", Dark: "#34343D"}
+	text       = lipgloss.AdaptiveColor{Light: "#1F1F24", Dark: "#ECECF1"}
+	secondary  = lipgloss.AdaptiveColor{Light: "#4E5058", Dark: "#B5BAC1"} // previews: readable, quieter than text
+	faint      = lipgloss.AdaptiveColor{Light: "#6D6F78", Dark: "#949BA4"} // timestamps, hints
+	subtle     = lipgloss.AdaptiveColor{Light: "#D5D5DE", Dark: "#3A3C45"}
 	bubbleLine = lipgloss.AdaptiveColor{Light: "#C4C4CF", Dark: "#4A4A56"}
-	selectedBg = lipgloss.AdaptiveColor{Light: "#ECEAFB", Dark: "#25223A"}
+	sidebarBg  = lipgloss.AdaptiveColor{Light: "#F2F3F5", Dark: "#1E1F24"}
+	selectedBg = lipgloss.AdaptiveColor{Light: "#DCDDF5", Dark: "#33344A"}
+	inputBg    = lipgloss.AdaptiveColor{Light: "#EBEDEF", Dark: "#2A2B33"}
 	green      = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}
 	yellow     = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#D29922"}
-	red        = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F85149"}
+	red        = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F23F43"}
 	white      = lipgloss.Color("#FFFFFF")
 
-	// People get stable colors (avatars, group sender names).
+	// People get stable, bright colors (avatars and names).
 	personColors = []lipgloss.AdaptiveColor{
-		{Light: "#B35900", Dark: "#D9822B"},
-		{Light: "#0969DA", Dark: "#3B82D6"},
-		{Light: "#8250DF", Dark: "#9A6BE8"},
-		{Light: "#BF3989", Dark: "#D05A9E"},
-		{Light: "#1A7F37", Dark: "#2EA043"},
-		{Light: "#0E7C86", Dark: "#1F9AA5"},
+		{Light: "#B35900", Dark: "#F0A35E"},
+		{Light: "#0969DA", Dark: "#5DADF5"},
+		{Light: "#8250DF", Dark: "#B794F6"},
+		{Light: "#BF3989", Dark: "#F47FB8"},
+		{Light: "#1A7F37", Dark: "#57D17A"},
+		{Light: "#0E7C86", Dark: "#4FD1D9"},
 	}
 
 	dimStyle    = lipgloss.NewStyle().Foreground(faint)
@@ -39,7 +43,7 @@ var (
 	errorStyle  = lipgloss.NewStyle().Foreground(red)
 	keyStyle    = lipgloss.NewStyle().Foreground(accent).Bold(true)
 	logoStyle   = lipgloss.NewStyle().Bold(true).Foreground(white).Background(accent).Padding(0, 1)
-	badgeStyle  = lipgloss.NewStyle().Bold(true).Foreground(white).Background(accent).Padding(0, 1)
+	badgeStyle  = lipgloss.NewStyle().Bold(true).Foreground(white).Background(red).Padding(0, 1)
 )
 
 func personColor(id string) lipgloss.AdaptiveColor {

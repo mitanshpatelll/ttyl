@@ -11,13 +11,16 @@ import (
 	"github.com/mitanshpatelll/dmz/internal/core"
 )
 
-// composerH is the framed reply box under the messages.
-const composerH = 3
+const (
+	composerH = 2               // a spacer and the message input
+	textCol   = 8               // message text starts here: edge, space, avatar (4), two spaces
+	groupGap  = 7 * time.Minute // messages from one person closer than this share a header
+)
 
-// chatHeader: name, platform and what matters about the chat (phone, group, quiet mode).
+// chatHeader: name, platform and what matters about the chat, then the unusual state.
 func (m Model) chatHeader(w int) string {
 	if m.open == nil {
-		return " " + dimStyle.Render("no chat open")
+		return spread(" "+dimStyle.Render("no chat open"), m.statusRight(), w)
 	}
 	style := boldStyle
 	if m.focus == focusChat || m.focus == focusCompose {
@@ -32,14 +35,11 @@ func (m Model) chatHeader(w int) string {
 			details = append(details, p)
 		}
 	}
-	if !m.inbox.Next.IsZero() {
-		details = append(details, "quiet mode")
-	}
-	head := " " + style.Render(m.open.Title()) + " " + platformTag(m.open.Platform)
+	head := " " + dimStyle.Render("@ ") + style.Render(m.open.Title()) + "  " + platformTag(m.open.Platform)
 	if len(details) > 0 {
 		head += dimStyle.Render(" · " + strings.Join(details, " · "))
 	}
-	return cw.Truncate(head, w, "…")
+	return spread(head, m.statusRight(), w)
 }
 
 // phone formats a WhatsApp chat ID for reading: "919825011420@s.whatsapp.net" → "+91 98250 11420".
@@ -54,7 +54,7 @@ func phone(id string) string {
 	return "+" + user
 }
 
-// chatLines is the chat column: the visible messages and the composer, exactly h lines.
+// chatLines is the conversation: the visible messages and the input, exactly h lines.
 func (m Model) chatLines(w, h int) []string {
 	if m.open == nil {
 		return m.viewNoChat(w, h)
@@ -68,26 +68,21 @@ func (m Model) chatLines(w, h int) []string {
 			lines = append(lines, "")
 		}
 	}
-	return append(lines, m.composer(w)...)
+	return append(lines, "", m.composer(w))
 }
 
-// composer is the framed reply box: "reply to Mummy (WA)".
-func (m Model) composer(w int) []string {
-	focused := m.focus == focusCompose
-	b := lipgloss.NewStyle().Foreground(subtle)
-	content := dimStyle.Render("› press ") + keyStyle.Render("i") + dimStyle.Render(" to reply")
-	if focused {
-		b = b.Foreground(accent)
-		content = accentStyle.Render("› ") + m.compose.View()
+// composer is the message input: one shaded line, "Message Mummy".
+func (m Model) composer(w int) string {
+	bg := on(inputBg)
+	inner := w - 4
+	var content string
+	if m.focus == focusCompose {
+		content = bg(accentStyle).Render("› ") + m.compose.View()
+	} else {
+		content = bg(dimStyle).Render("Message "+cw.Truncate(m.open.Title(), max(4, inner-30), "…")+"   ·   press ") +
+			bg(keyStyle).Render("i") + bg(dimStyle).Render(" to type")
 	}
-	bw := w - 2
-	title := dimStyle.Render("reply to "+cw.Truncate(m.open.Title(), max(4, bw-20), "…")+" (") + platformTag(m.open.Platform) + dimStyle.Render(")")
-	fill := max(0, bw-5-cw.String(title))
-	return []string{
-		" " + b.Render("╭─ ") + title + " " + b.Render(strings.Repeat("─", fill)+"╮") + " ",
-		" " + b.Render("│") + " " + cw.Pad(content, bw-4) + " " + b.Render("│") + " ",
-		" " + b.Render("╰"+strings.Repeat("─", bw-2)+"╯") + " ",
-	}
+	return "  " + bg(lipgloss.NewStyle()).Render(" ") + fill(content, inner-1, inputBg) + "  "
 }
 
 func (m Model) viewNoChat(w, h int) []string {
@@ -127,7 +122,7 @@ func (m Model) viewNoChat(w, h int) []string {
 	return lines[:h]
 }
 
-// renderChat lays out the message log and records where each message starts.
+// renderChat lays out the conversation and records where each message starts.
 func (m *Model) renderChat() {
 	w := m.chatView.Width
 	if w <= 0 || m.open == nil {
@@ -142,40 +137,37 @@ func (m *Model) renderChat() {
 		m.bubbles, m.bubbleWidth = map[string][]string{}, w
 	}
 
-	newCount := 0
-	if !m.newFrom.IsZero() {
-		for _, msg := range m.messages {
-			if !msg.FromMe && msg.Timestamp.After(m.newFrom) {
-				newCount++
-			}
-		}
-	}
 	now := time.Now()
 	var lines []string
 	var lastDay string
 	newShown := false
 	for i, msg := range m.messages {
+		breakHere := false
 		if day := dayLabel(msg.Timestamp, now); day != lastDay {
 			lastDay = day
-			lines = append(lines, "", cw.Center(dimStyle.Render("── "+day+" ──"), w))
+			lines = append(lines, "", rule(dimStyle.Render(day), w, faint))
+			breakHere = true
 		}
-		if newCount > 0 && !newShown && !msg.FromMe && msg.Timestamp.After(m.newFrom) {
+		if !m.newFrom.IsZero() && !newShown && !msg.FromMe && msg.Timestamp.After(m.newFrom) {
 			newShown = true
-			label := fmt.Sprintf(" %d new message", newCount)
-			if newCount > 1 {
-				label += "s"
-			}
-			label += " "
-			side := max(1, (w-2-cw.String(label))/2)
 			lines = append(lines, "")
 			m.newLine = len(lines)
-			lines = append(lines, " "+accentStyle.Render(strings.Repeat("═", side)+label+strings.Repeat("═", max(1, w-2-side-cw.String(label)))))
+			newLabel := lipgloss.NewStyle().Bold(true).Foreground(white).Background(red).Render(" NEW ")
+			lines = append(lines, " "+lipgloss.NewStyle().Foreground(red).Render(strings.Repeat("─", max(1, w-7)))+newLabel+" ")
+			breakHere = true
 		}
-		lines = append(lines, "")
+		header := true
+		if i > 0 && !breakHere {
+			prev := m.messages[i-1]
+			header = prev.SenderID != msg.SenderID || prev.FromMe != msg.FromMe || msg.Timestamp.Sub(prev.Timestamp) >= groupGap
+		}
+		if header {
+			lines = append(lines, "") // space between people
+		}
 		m.starts = append(m.starts, len(lines))
-		lines = append(lines, m.bubble(msg, w, i == m.sel && m.focus == focusChat)...)
+		lines = append(lines, m.message(msg, w, header, i == m.sel && m.focus == focusChat, now)...)
 	}
-	// Short chats sit at the bottom, next to the composer, like any chat app.
+	// Short chats sit at the bottom, next to the input, like any chat app.
 	if pad := m.chatView.Height - len(lines); pad > 0 {
 		lines = append(make([]string, pad), lines...)
 		for i := range m.starts {
@@ -188,98 +180,81 @@ func (m *Model) renderChat() {
 	m.setChatContent(lines)
 }
 
+// rule is a full-width line with a label in the middle: "──── Today ────".
+func rule(label string, w int, color lipgloss.TerminalColor) string {
+	lw := cw.String(label) + 2
+	side := max(1, (w-2-lw)/2)
+	line := lipgloss.NewStyle().Foreground(color)
+	return " " + line.Render(strings.Repeat("─", side)) + " " + label + " " + line.Render(strings.Repeat("─", max(1, w-2-side-lw))) + " "
+}
+
 func (m *Model) setChatContent(lines []string) {
 	m.chatContent = lines
 	m.chatView.SetContent(strings.Join(lines, "\n")) // the viewport only keeps track of scrolling
 }
 
-type boxChars struct{ tl, tr, bl, br, h, v string }
-
-var (
-	roundBox = boxChars{"╭", "╮", "╰", "╯", "─", "│"}
-	thickBox = boxChars{"┏", "┓", "┗", "┛", "━", "┃"}
-)
-
-// bubble draws one message: theirs on the left with the sender and time in the top border,
-// yours on the right with the time. The selected one has a thick accent border.
-func (m *Model) bubble(msg core.Message, w int, selected bool) []string {
-	key := fmt.Sprint(msg.ID, selected, msg.Body, msg.Meta, msg.Edited, msg.Deleted, msg.Reactions, msg.SenderName)
+// message renders one message Discord style. The first of a run gets a header (avatar,
+// bold colored name, time); its text and any follow-ups sit underneath, aligned with the name.
+// The selected message gets an accent edge on every line.
+func (m *Model) message(msg core.Message, w int, header, selected bool, now time.Time) []string {
+	key := fmt.Sprint(msg.ID, header, selected, msg.Body, msg.Meta, msg.Edited, msg.Deleted, msg.Reactions, msg.SenderName, sameDay(msg.Timestamp, now))
 	if cached, ok := m.bubbles[key]; ok {
 		return cached
 	}
+	edge := " "
+	if selected {
+		edge = accentStyle.Render("▌")
+	}
+	indent := edge + strings.Repeat(" ", textCol-1)
 
-	maxW := max(16, min(w-4, w*68/100))
-	minW := min(maxW, max(20, w*40/100))
+	var out []string
+	if header {
+		name, avatarID := msg.Sender(), msg.SenderID
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(personColor(avatarID))
+		if msg.FromMe {
+			name, avatarID = "You", "me"
+			nameStyle = nameStyle.Foreground(accent)
+		}
+		avatarBlock := lipgloss.NewStyle().Bold(true).Foreground(white).Background(personColor(avatarID)).Render(" " + cw.Pad(initialsOf(name), 2) + " ")
+		if msg.FromMe {
+			avatarBlock = lipgloss.NewStyle().Bold(true).Foreground(white).Background(accentSoft).Render(" ME ")
+		}
+		when := dimStyle.Render(stamp(msg.Timestamp, now))
+		room := w - textCol - cw.String(when) - 3
+		out = append(out, edge+" "+avatarBlock+"  "+nameStyle.Render(cw.Truncate(name, max(4, room), "…"))+"  "+when)
+	}
 
 	tag := mediaTag(msg)
-	plain := strings.TrimSpace(tag + " " + msg.Body)
-	body := cw.Wrap(plain, maxW-4)
-	if tag != "" && strings.HasPrefix(body[0], tag) { // style the placeholder, not the caption
-		style := tagStyle
-		if msg.Deleted {
-			style = dimStyle.Italic(true)
+	body := cw.Wrap(strings.TrimSpace(tag+" "+msg.Body), max(10, w-textCol-2))
+	textStyle := lipgloss.NewStyle().Foreground(text)
+	for i, l := range body {
+		styled := textStyle.Render(l)
+		if i == 0 && tag != "" && strings.HasPrefix(l, tag) { // the placeholder stands out from the caption
+			style := tagStyle
+			if msg.Deleted {
+				style = dimStyle.Italic(true)
+			}
+			styled = style.Render(tag) + textStyle.Render(strings.TrimPrefix(l, tag))
 		}
-		body[0] = style.Render(tag) + strings.TrimPrefix(body[0], tag)
+		out = append(out, indent+styled)
 	}
-
-	stamp := msg.Timestamp.Format("15:04")
 	if msg.Edited && !msg.Deleted {
-		stamp += " · edited"
-	}
-	label := dimStyle.Render(stamp)
-	if !msg.FromMe {
-		label = senderStyle(msg.SenderID).Render(cw.Truncate(msg.Sender(), max(4, maxW-18), "…")) + " " + label
-	}
-
-	contentW := 0
-	for _, l := range body {
-		contentW = max(contentW, cw.String(l))
-	}
-	bw := min(maxW, max(minW, contentW+4, cw.String(label)+7))
-
-	chars, color := roundBox, bubbleLine
-	if msg.FromMe {
-		color = accentSoft
-	}
-	if selected {
-		chars, color = thickBox, accent
-	}
-	b := lipgloss.NewStyle().Foreground(color)
-	fill := strings.Repeat(chars.h, max(0, bw-5-cw.String(label)))
-	var top string
-	if msg.FromMe {
-		top = b.Render(chars.tl+fill) + " " + label + " " + b.Render(chars.h+chars.tr)
-	} else {
-		top = b.Render(chars.tl+chars.h) + " " + label + " " + b.Render(fill+chars.tr)
-	}
-	box := []string{top}
-	for _, l := range body {
-		box = append(box, b.Render(chars.v)+" "+cw.Pad(l, bw-4)+" "+b.Render(chars.v))
-	}
-	box = append(box, b.Render(chars.bl+strings.Repeat(chars.h, bw-2)+chars.br))
-
-	indent := "  "
-	if msg.FromMe {
-		indent = strings.Repeat(" ", max(0, w-bw-2))
-	}
-	out := make([]string, 0, len(box)+1)
-	for _, l := range box {
-		out = append(out, indent+l)
+		last := out[len(out)-1]
+		if cw.String(last)+9 <= w {
+			out[len(out)-1] = last + dimStyle.Render(" (edited)")
+		} else {
+			out = append(out, indent+dimStyle.Render("(edited)"))
+		}
 	}
 	if len(msg.Reactions) > 0 {
 		parts := make([]string, len(msg.Reactions))
 		for i, r := range msg.Reactions {
 			parts[i] = r.Emoji
 			if r.Count > 1 {
-				parts[i] += fmt.Sprint(r.Count)
+				parts[i] += " " + fmt.Sprint(r.Count)
 			}
 		}
-		reactions := dimStyle.Render(cw.Truncate(strings.Join(parts, " "), bw, "…"))
-		if msg.FromMe {
-			out = append(out, strings.Repeat(" ", max(0, w-cw.String(reactions)-3))+reactions)
-		} else {
-			out = append(out, "   "+reactions)
-		}
+		out = append(out, indent+dimStyle.Render(cw.Truncate(strings.Join(parts, "   "), w-textCol-2, "…")))
 	}
 	m.bubbles[key] = out
 	return out
@@ -294,7 +269,7 @@ func mediaTag(msg core.Message) string {
 		return "[" + tag + " " + detail + "]"
 	}
 	if msg.Deleted {
-		return "[deleted]"
+		return "[message deleted]"
 	}
 	switch msg.Kind {
 	case core.KindImage:

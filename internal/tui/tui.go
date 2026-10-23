@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mitanshpatelll/dmz/internal/app"
 	"github.com/mitanshpatelll/dmz/internal/core"
@@ -100,6 +101,12 @@ func New(a *app.App) Model {
 	compose.Prompt = ""
 	compose.Placeholder = "Write a message…"
 	compose.CharLimit = 4096
+	compose.TextStyle = lipgloss.NewStyle().Foreground(text).Background(inputBg)
+	compose.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint).Background(inputBg)
+	compose.Cursor.TextStyle = lipgloss.NewStyle().Background(inputBg)
+	filter.TextStyle = lipgloss.NewStyle().Foreground(text).Background(sidebarBg)
+	filter.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint).Background(sidebarBg)
+	filter.Cursor.TextStyle = lipgloss.NewStyle().Background(sidebarBg)
 	extend := textinput.New()
 	extend.Prompt = "> "
 	extend.Placeholder = `type "extend" for 5 more minutes`
@@ -586,7 +593,7 @@ func (m *Model) layout() {
 	m.chatView.Width = rw
 	m.chatView.Height = max(1, m.bodyH()-composerH)
 	m.compose.Width = max(1, rw-9)
-	m.filter.Width = max(1, m.leftW()-14)
+	m.filter.Width = max(1, m.leftW()-12)
 	m.renderChat()
 	m.showSelected()
 	m.scrollInbox()

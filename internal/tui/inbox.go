@@ -27,98 +27,107 @@ func platformTag(p core.PlatformID) string {
 	return lipgloss.NewStyle().Foreground(platformColors[p]).Render(platformTags[p])
 }
 
-// inboxHeader is "INBOX (n)" with the cursor position, or the search box while searching.
-func (m Model) inboxHeader(w int) string {
-	pos := ""
-	if len(m.visible) > 0 {
-		pos = dimStyle.Render(fmt.Sprintf("[%d/%d] ", m.cursor+1, len(m.visible)))
-	}
-	if m.filterShown() {
-		return spread(accentStyle.Render(" / ")+m.filter.View(), pos, w)
-	}
-	style := boldStyle
-	if m.focus == focusInbox {
-		style = style.Foreground(accent)
-	}
-	return spread(" "+style.Render("INBOX")+dimStyle.Render(fmt.Sprintf(" (%d)", len(m.inbox.Chats))), pos, w)
+// avatar is a colored block with initials, the way a chat app shows a profile picture.
+func avatar(id, name string) string {
+	return lipgloss.NewStyle().Bold(true).Foreground(white).Background(personColor(id)).Render(" " + cw.Pad(initialsOf(name), 2) + " ")
 }
 
-// inboxLines is the inbox column: two lines per chat and a spacer, exactly h lines.
+// inboxHeader is the sidebar heading under the top bar, or the search box while searching.
+func (m Model) inboxHeader(w int) string {
+	bg := on(sidebarBg)
+	pos := ""
+	if len(m.visible) > 0 {
+		pos = bg(dimStyle).Render(fmt.Sprintf("%d/%d ", m.cursor+1, len(m.visible)))
+	}
+	var left string
+	if m.filterShown() {
+		left = bg(accentStyle).Render(" / ") + m.filter.View()
+	} else {
+		style := bg(dimStyle.Bold(true))
+		if m.focus == focusInbox {
+			style = style.Foreground(accent)
+		}
+		left = bg(lipgloss.NewStyle()).Render(" ") + style.Render("MESSAGES")
+	}
+	gap := max(1, w-cw.String(left)-cw.String(pos))
+	return fill(left+bg(lipgloss.NewStyle()).Render(strings.Repeat(" ", gap))+pos, w, sidebarBg)
+}
+
+// inboxLines is the sidebar body: two lines per chat, exactly h lines, all on the sidebar shade.
 func (m Model) inboxLines(w, h int) []string {
 	var lines []string
 	if len(m.visible) == 0 {
-		msg := []string{boldStyle.Render("Waiting for your chats"), "", dimStyle.Render("The first sync after linking"), dimStyle.Render("can take a few minutes.")}
+		bg := on(sidebarBg)
+		msg := []string{bg(boldStyle).Render("Waiting for your chats"), "", bg(dimStyle).Render("The first sync after linking"), bg(dimStyle).Render("can take a few minutes.")}
 		if m.filter.Value() != "" {
-			msg = []string{dimStyle.Render("No chat matches"), dimStyle.Render("“" + m.filter.Value() + "”")}
+			msg = []string{bg(dimStyle).Render("No chat matches “" + m.filter.Value() + "”")}
 		}
 		for range (h - len(msg)) / 2 {
 			lines = append(lines, "")
 		}
 		for _, l := range msg {
-			lines = append(lines, cw.Center(l, w))
+			pad := max(0, (w-cw.String(l))/2)
+			lines = append(lines, bg(lipgloss.NewStyle()).Render(strings.Repeat(" ", pad))+l)
 		}
 	}
 	multi := m.multiPlatform()
 	for i := m.offset; i < len(m.visible) && len(lines)+2 <= h; i++ {
 		lines = append(lines, m.inboxRow(m.visible[i], i == m.cursor, multi, w)...)
-		lines = append(lines, "")
 	}
 	for len(lines) < h {
 		lines = append(lines, "")
 	}
+	for i := range lines {
+		lines[i] = fill(lines[i], w, sidebarBg)
+	}
 	return lines[:h]
 }
 
-// viewInbox is the inbox column as one string (used by tests).
+// viewInbox is the sidebar as one string (used by tests).
 func (m Model) viewInbox(w, h int) string { return strings.Join(m.inboxLines(w, h), "\n") }
 
-// inboxRow: initials, name, platform and time; then the preview and the unread count.
-// The selected row is highlighted across the whole column.
+// inboxRow: avatar, name and time; then the preview and the unread count. The selected row
+// is a lighter shade with an accent edge.
 func (m Model) inboxRow(c core.ChatSummary, selected, multi bool, w int) []string {
-	on := func(s lipgloss.Style) lipgloss.Style {
-		if selected {
-			return s.Background(selectedBg)
-		}
-		return s
-	}
-	plain := on(lipgloss.NewStyle())
-	bar := plain.Render(" ")
+	shade := lipgloss.TerminalColor(sidebarBg)
 	if selected {
-		bar = on(accentStyle).Render("▌")
+		shade = selectedBg
 	}
-	initials := on(lipgloss.NewStyle().Bold(true).Foreground(personColor(chatKey(c.Chat)))).Render(cw.Pad(initialsOf(c.Title()), 2))
+	bg := on(shade)
+	plain := bg(lipgloss.NewStyle())
+	edge := plain.Render(" ")
+	if selected {
+		edge = bg(accentStyle).Render("▌")
+	}
 
-	when := on(dimStyle).Render(shortTime(c.Last.Timestamp, time.Now()))
+	when := bg(dimStyle).Render(shortTime(c.Last.Timestamp, time.Now()))
 	if multi {
-		when = on(lipgloss.NewStyle().Foreground(platformColors[c.Platform])).Render(platformTags[c.Platform]) + plain.Render("  ") + when
+		when = bg(lipgloss.NewStyle().Foreground(platformColors[c.Platform])).Render(platformTags[c.Platform]) + plain.Render(" ") + when
 	}
-	nameStyle := on(lipgloss.NewStyle().Foreground(text))
-	if c.Unread > 0 {
-		nameStyle = nameStyle.Bold(true)
+	nameStyle := bg(lipgloss.NewStyle().Foreground(secondary))
+	if c.Unread > 0 || selected {
+		nameStyle = nameStyle.Foreground(text).Bold(true)
 	}
-	if selected && (m.focus == focusInbox || m.focus == focusFilter) {
-		nameStyle = nameStyle.Foreground(accent)
-	}
-	nameRoom := w - 5 - cw.String(when) - 2
+	nameRoom := w - 7 - cw.String(when) - 2
 	name := highlightMatch(cw.Truncate(c.Title(), max(1, nameRoom), "…"), m.filter.Value(), nameStyle)
 
 	pill := ""
 	if c.Unread > 0 {
 		pill = badgeStyle.Render(fmt.Sprint(c.Unread))
 	}
-	previewStyle := on(dimStyle)
+	previewStyle := bg(dimStyle)
 	if c.Unread > 0 {
-		previewStyle = on(lipgloss.NewStyle().Foreground(text))
+		previewStyle = bg(lipgloss.NewStyle().Foreground(secondary))
 	}
-	preview := previewStyle.Render(cw.Truncate(previewText(c), max(1, w-5-cw.String(pill)-2), "…"))
+	preview := previewStyle.Render(cw.Truncate(previewText(c), max(1, w-7-cw.String(pill)-2), "…"))
 
 	line := func(left, right string) string {
 		gap := max(1, w-cw.String(left)-cw.String(right)-1)
 		return left + plain.Render(strings.Repeat(" ", gap)) + right + plain.Render(" ")
 	}
 	return []string{
-		line(bar+plain.Render(" ")+initials+plain.Render(" ")+name, when),
-		line(bar+plain.Render("    ")+preview, pill),
+		line(edge+plain.Render(" ")+avatar(chatKey(c.Chat), c.Title())+plain.Render(" ")+name, when),
+		line(edge+plain.Render("       ")+preview, pill),
 	}
 }
 
