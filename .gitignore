@@ -4,3 +4,5 @@ bin/
 *.db-shm
 *.log
 .DS_Store
+/dmz
+/ttyl
