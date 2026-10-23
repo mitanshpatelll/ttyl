@@ -4,6 +4,10 @@
 
 **your DMs in the terminal. no feed. no reels. no "seen". talk to you later.**
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-a79bff)](LICENSE)
+![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8)
+![macOS](https://img.shields.io/badge/macOS-tested-lightgrey)
+
 WhatsApp, Telegram and Instagram chats in one keyboard-only TUI,
 built for people who want to reply to their friends without losing an hour to the scroll.
 
@@ -161,6 +165,10 @@ ever rewritten to hide or release messages.
 make test           # vet + tests
 TTYL_GALLERY=1 go test -run Gallery -v ./internal/tui   # print every screen
 ```
+
+## license
+
+[MIT](LICENSE) © 2026 Mitansh Patel. Do what you want with it, just keep the notice.
 
 Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea),
 [whatsmeow](https://github.com/tulir/whatsmeow), [gotd](https://github.com/gotd/td) and
