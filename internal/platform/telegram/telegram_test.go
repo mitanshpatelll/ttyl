@@ -14,7 +14,7 @@ import (
 	"github.com/gotd/td/tgerr"
 	"github.com/rs/zerolog"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 func newTestClient(t *testing.T) *Client {

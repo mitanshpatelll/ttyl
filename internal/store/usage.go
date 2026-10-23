@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Usage is one day of dmz use. Received is counted from stored messages, not tracked.
+// Usage is one day of ttyl use. Received is counted from stored messages, not tracked.
 type Usage struct {
 	Day        time.Time // local midnight
 	Active     time.Duration

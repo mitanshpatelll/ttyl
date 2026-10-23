@@ -12,14 +12,14 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/term"
 
-	"github.com/mitanshpatelll/dmz/internal/config"
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/platform"
-	"github.com/mitanshpatelll/dmz/internal/platform/instagram"
-	"github.com/mitanshpatelll/dmz/internal/platform/telegram"
-	"github.com/mitanshpatelll/dmz/internal/platform/whatsapp"
-	"github.com/mitanshpatelll/dmz/internal/secret"
-	"github.com/mitanshpatelll/dmz/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/config"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/platform"
+	"github.com/mitanshpatelll/ttyl/internal/platform/instagram"
+	"github.com/mitanshpatelll/ttyl/internal/platform/telegram"
+	"github.com/mitanshpatelll/ttyl/internal/platform/whatsapp"
+	"github.com/mitanshpatelll/ttyl/internal/secret"
+	"github.com/mitanshpatelll/ttyl/internal/store"
 )
 
 // env is what every command shares: data dir, config, logger, keychain vault and the message store.
@@ -37,6 +37,11 @@ type env struct {
 }
 
 func setup() (*env, error) {
+	if moved, err := migrateFromDMZ(); err != nil {
+		return nil, fmt.Errorf("moving your data from dmz to ttyl: %w", err)
+	} else if moved {
+		fmt.Fprintln(os.Stderr, "ttyl: moved your data over from dmz (one time).")
+	}
 	dir, err := config.Dir()
 	if err != nil {
 		return nil, err
@@ -46,12 +51,12 @@ func setup() (*env, error) {
 		return nil, err
 	}
 	// The TUI owns stdout, so every log line goes to a file.
-	logFile, err := os.OpenFile(filepath.Join(dir, "dmz.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	logFile, err := os.OpenFile(filepath.Join(dir, "ttyl.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	level := zerolog.InfoLevel
-	if os.Getenv("DMZ_DEBUG") != "" {
+	if os.Getenv("TTYL_DEBUG") != "" {
 		level = zerolog.DebugLevel
 	}
 	e := &env{dir: dir, cfg: cfg, vault: secret.New(dir), logFile: logFile,
@@ -63,7 +68,7 @@ func setup() (*env, error) {
 		return nil, fmt.Errorf("%w (is the login keychain locked?)", err)
 	}
 	e.log.Debug().Str("key", where).Msg("message store encrypted at rest")
-	if e.store, err = store.Open(filepath.Join(dir, "dmz.db"), key); err != nil {
+	if e.store, err = store.Open(filepath.Join(dir, "ttyl.db"), key); err != nil {
 		logFile.Close()
 		return nil, err
 	}

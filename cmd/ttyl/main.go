@@ -1,4 +1,4 @@
-// Command dmz is a distraction-free terminal client for your DMs.
+// Command ttyl is a distraction-free terminal client for your DMs.
 package main
 
 import (
@@ -17,34 +17,34 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/mitanshpatelll/dmz/internal/app"
-	"github.com/mitanshpatelll/dmz/internal/cellwidth"
-	"github.com/mitanshpatelll/dmz/internal/config"
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/platform"
-	"github.com/mitanshpatelll/dmz/internal/rules"
-	"github.com/mitanshpatelll/dmz/internal/store"
-	"github.com/mitanshpatelll/dmz/internal/tui"
+	"github.com/mitanshpatelll/ttyl/internal/app"
+	"github.com/mitanshpatelll/ttyl/internal/cellwidth"
+	"github.com/mitanshpatelll/ttyl/internal/config"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/platform"
+	"github.com/mitanshpatelll/ttyl/internal/rules"
+	"github.com/mitanshpatelll/ttyl/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/tui"
 )
 
 // version is set at build time: -ldflags "-X main.version=v1.0.0".
 var version = "dev"
 
-const usage = `dmz: your DMs in the terminal, without the feed
+const usage = `ttyl: your DMs in the terminal, without the feed
 
 Usage:
-  dmz                              open your chats
-  dmz login <platform>             link an account, then open your chats
-  dmz logout <platform> [--purge]  unlink an account; --purge also deletes its stored messages
-  dmz stats [days]                 time spent and messages per day (default 7)
-  dmz version
+  ttyl                              open your chats
+  ttyl login <platform>             link an account, then open your chats
+  ttyl logout <platform> [--purge]  unlink an account; --purge also deletes its stored messages
+  ttyl stats [days]                 time spent and messages per day (default 7)
+  ttyl version
 
 Platforms: whatsapp (wa), telegram (tg), instagram (ig)
-Data and config: ~/Library/Application Support/dmz (or $DMZ_HOME)
+Data and config: ~/Library/Application Support/ttyl (or $TTYL_HOME)
 `
 
 func main() {
-	// Session keys and message text: every file dmz or SQLite creates (incl. -wal/-shm) is owner-only.
+	// Session keys and message text: every file ttyl or SQLite creates (incl. -wal/-shm) is owner-only.
 	syscall.Umask(0o077)
 
 	args := os.Args[1:]
@@ -63,15 +63,15 @@ func main() {
 	case "stats":
 		err = runStats(args)
 	case "version", "--version", "-v":
-		fmt.Println("dmz", version)
+		fmt.Println("ttyl", version)
 	case "help", "--help", "-h":
 		fmt.Print(usage)
 	default:
-		fmt.Fprintf(os.Stderr, "dmz: unknown command %q\n\n%s", cmd, usage)
+		fmt.Fprintf(os.Stderr, "ttyl: unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
 	}
 	if err != nil && !errors.Is(err, context.Canceled) {
-		fmt.Fprintln(os.Stderr, "dmz:", err)
+		fmt.Fprintln(os.Stderr, "ttyl:", err)
 		os.Exit(1)
 	}
 }
@@ -106,7 +106,7 @@ func runChats(login core.PlatformID) error {
 		return err
 	}
 	if login == "" && !anyLinked(accounts) {
-		fmt.Println("No accounts linked yet, starting with WhatsApp. (dmz login telegram / instagram for the others.)")
+		fmt.Println("No accounts linked yet, starting with WhatsApp. (ttyl login telegram / instagram for the others.)")
 		login = core.WhatsApp
 	}
 	var linked []platform.Account
@@ -242,7 +242,7 @@ func runLogout(args []string) error {
 		if !acct.LoggedIn() {
 			fmt.Println(id, "is not linked.")
 		} else if err := acct.Logout(ctx); err != nil {
-			fmt.Fprintln(os.Stderr, "dmz:", err)
+			fmt.Fprintln(os.Stderr, "ttyl:", err)
 		} else {
 			fmt.Println(id, "unlinked and local session deleted.")
 		}
@@ -275,7 +275,7 @@ func runStats(args []string) error {
 		return err
 	}
 
-	fmt.Printf("dmz, last %d days\n\n", days)
+	fmt.Printf("ttyl, last %d days\n\n", days)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', tabwriter.AlignRight)
 	fmt.Fprintln(w, "day\ttime\topens\tsent\treceived\textended\t")
 	var total store.Usage

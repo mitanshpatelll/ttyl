@@ -17,7 +17,7 @@ import (
 // Empty strings stay empty: queries rely on name != ”.
 const sealedPrefix = "e1:"
 
-var ErrWrongKey = errors.New("dmz.db was encrypted with a different key (the \"dmz\" Keychain item is missing or was replaced); move dmz.db away to start fresh")
+var ErrWrongKey = errors.New("ttyl.db was encrypted with a different key (the \"ttyl\" Keychain item is missing or was replaced); move ttyl.db away to start fresh")
 
 type sealer struct{ aead cipher.AEAD } // nil aead: no key, values stay plaintext
 
@@ -97,7 +97,7 @@ func (s *Store) initKey() error {
 		if _, err := s.sealer.open(check, "keycheck"); err != nil {
 			return ErrWrongKey
 		}
-	} else if err := s.putSetting("keycheck", s.sealer.seal("dmz", "keycheck")); err != nil {
+	} else if err := s.putSetting("keycheck", s.sealer.seal("dmz", "keycheck")); err != nil { // only decryptability matters; value predates the ttyl rename
 		return err
 	}
 	if done, err := s.setting("sealed"); err != nil || done == "1" {

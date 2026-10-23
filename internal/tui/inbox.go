@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	cw "github.com/mitanshpatelll/dmz/internal/cellwidth"
-	"github.com/mitanshpatelll/dmz/internal/core"
+	cw "github.com/mitanshpatelll/ttyl/internal/cellwidth"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 var platformTags = map[core.PlatformID]string{

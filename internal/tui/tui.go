@@ -12,8 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/mitanshpatelll/dmz/internal/app"
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/app"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // RefreshMsg tells the UI that stored data changed and should be reloaded.

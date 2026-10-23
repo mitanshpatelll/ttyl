@@ -1,7 +1,7 @@
 // Package telegram adapts gotd (Telegram's official MTProto API) to core.Platform.
 //
 // Live messages come through gotd's updates manager, which also fills gaps while connected.
-// Messages that arrived while dmz was closed are caught up from the 100 most recent dialogs on
+// Messages that arrived while ttyl was closed are caught up from the 100 most recent dialogs on
 // every connect. Broadcast channels are dropped like WhatsApp channels; reactions are not shown.
 package telegram
 
@@ -29,9 +29,9 @@ import (
 	"github.com/gotd/td/tgerr"
 	"github.com/rs/zerolog"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/platform"
-	"github.com/mitanshpatelll/dmz/internal/secret"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/platform"
+	"github.com/mitanshpatelll/ttyl/internal/secret"
 )
 
 const (
@@ -133,7 +133,7 @@ func (c *Client) newClient(gaps *updates.Manager) *telegram.Client {
 	opts := telegram.Options{
 		SessionStorage: keychainSession{c.cfg.Vault},
 		Device: telegram.DeviceConfig{
-			DeviceModel:   "dmz",
+			DeviceModel:   "ttyl",
 			SystemVersion: runtime.GOOS,
 			AppVersion:    c.cfg.Version,
 		},
@@ -153,7 +153,7 @@ func (c *Client) newClient(gaps *updates.Manager) *telegram.Client {
 
 // Login signs in with phone, code and (if set) the two-step password, then connects.
 func (c *Client) Login(ctx context.Context, t platform.Terminal) error {
-	fmt.Fprintln(t, "Log in to Telegram. dmz will show up as \"dmz\" under Settings → Devices.")
+	fmt.Fprintln(t, "Log in to Telegram. ttyl will show up as \"ttyl\" under Settings → Devices.")
 	client := c.newClient(nil)
 	err := client.Run(ctx, func(ctx context.Context) error {
 		return client.Auth().IfNecessary(ctx, auth.NewFlow(termAuth{t}, auth.SendCodeOptions{}))
@@ -171,8 +171,8 @@ func explain(err error) error {
 		"API_ID_PUBLISHED_FLOOD": "this api_id is blocked for being public: create your own at https://my.telegram.org",
 		"PHONE_NUMBER_INVALID":   "that phone number is not valid: include the country code, e.g. +15551234567",
 		"PHONE_NUMBER_BANNED":    "Telegram has banned this phone number",
-		"PHONE_CODE_INVALID":     "wrong code: run dmz login telegram again",
-		"PHONE_CODE_EXPIRED":     "the code expired: run dmz login telegram again",
+		"PHONE_CODE_INVALID":     "wrong code: run ttyl login telegram again",
+		"PHONE_CODE_EXPIRED":     "the code expired: run ttyl login telegram again",
 		"PASSWORD_HASH_INVALID":  "wrong two-step verification password",
 	} {
 		if tgerr.Is(err, code) {
@@ -232,7 +232,7 @@ func (c *Client) Connect(ctx context.Context) error {
 				return err
 			}
 			if !st.Authorized {
-				c.status(core.StateLoggedOut, "session ended, run dmz login telegram")
+				c.status(core.StateLoggedOut, "session ended, run ttyl login telegram")
 				return nil
 			}
 			c.mu.Lock()
@@ -348,7 +348,7 @@ func (c *Client) register(d tg.UpdateDispatcher) {
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
-// catchUp loads recent dialogs and fetches history for chats with messages dmz hasn't seen.
+// catchUp loads recent dialogs and fetches history for chats with messages ttyl hasn't seen.
 // Seen marks are saved when the client stops, after these events have been drained to the store.
 func (c *Client) catchUp(ctx context.Context) {
 	api, err := c.currentAPI()

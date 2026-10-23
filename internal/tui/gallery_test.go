@@ -13,18 +13,18 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/rs/zerolog"
 
-	"github.com/mitanshpatelll/dmz/internal/app"
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/rules"
-	"github.com/mitanshpatelll/dmz/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/app"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/rules"
+	"github.com/mitanshpatelll/ttyl/internal/store"
 )
 
-// TestGallery prints every main screen for a visual check: DMZ_GALLERY=1 go test -run Gallery -v ./internal/tui
+// TestGallery prints every main screen for a visual check: TTYL_GALLERY=1 go test -run Gallery -v ./internal/tui
 func TestGallery(t *testing.T) {
-	if os.Getenv("DMZ_GALLERY") == "" {
-		t.Skip("set DMZ_GALLERY=1 to print the screens")
+	if os.Getenv("TTYL_GALLERY") == "" {
+		t.Skip("set TTYL_GALLERY=1 to print the screens")
 	}
-	if mode := os.Getenv("DMZ_GALLERY"); mode == "dark" || mode == "light" { // keep colors for screenshots
+	if mode := os.Getenv("TTYL_GALLERY"); mode == "dark" || mode == "light" { // keep colors for screenshots
 		lipgloss.SetColorProfile(termenv.TrueColor)
 		lipgloss.SetHasDarkBackground(mode == "dark")
 	}
@@ -81,7 +81,12 @@ func gallery(t *testing.T, width, height int) {
 		Messages: []core.Message{msg(tg, "u1", "1", "u2", "Sam", false, ago(90), "deploy is green ✅")}, ReadUpTo: map[string]time.Time{"u1": now}})
 
 	r, _ := rules.New(nil)
-	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(), DailyLimit: 30 * time.Minute}, &fakePlatform{})
+	wa1, tg1 := &onlinePlatform{id: wa, events: make(chan core.Event, 1)}, &onlinePlatform{id: tg, events: make(chan core.Event, 1)}
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(), DailyLimit: 30 * time.Minute}, wa1, tg1)
+	for _, p := range []*onlinePlatform{wa1, tg1} {
+		p.events <- core.StatusEvent{Platform: p.id, State: core.StateConnected}
+	}
+	a.Drain() // both show as online
 	{
 		size := [2]int{width, height}
 		m := New(a)
@@ -115,3 +120,13 @@ func gallery(t *testing.T, width, height int) {
 	}
 	_ = strings.TrimSpace
 }
+
+// onlinePlatform is a fake that reports itself connected, for good-looking screenshots.
+type onlinePlatform struct {
+	fakePlatform
+	id     core.PlatformID
+	events chan core.Event
+}
+
+func (p *onlinePlatform) ID() core.PlatformID       { return p.id }
+func (p *onlinePlatform) Events() <-chan core.Event { return p.events }

@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// peer is what dmz remembers about a Telegram user, group or channel. Access hashes are needed
+// peer is what ttyl remembers about a Telegram user, group or channel. Access hashes are needed
 // to address users and channels; they are useless without the session, which lives in the keychain.
 type peer struct {
 	Hash      int64  `json:"h,omitempty"`

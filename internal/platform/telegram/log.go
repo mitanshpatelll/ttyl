@@ -7,7 +7,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// zlog sends gotd's log records to dmz.log.
+// zlog sends gotd's log records to ttyl.log.
 type zlog struct{ l zerolog.Logger }
 
 func zeroLevel(lv log.Level) zerolog.Level {

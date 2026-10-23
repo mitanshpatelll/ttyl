@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // mediaTTL is how long opened attachments stay in the cache folder.
@@ -97,7 +97,7 @@ func fileName(id, name string) string {
 // quarantine tags the file like a browser download, so Gatekeeper checks it before anything runs.
 func quarantine(path string) {
 	if runtime.GOOS == "darwin" {
-		_ = unix.Setxattr(path, "com.apple.quarantine", fmt.Appendf(nil, "0081;%x;dmz;", time.Now().Unix()), 0)
+		_ = unix.Setxattr(path, "com.apple.quarantine", fmt.Appendf(nil, "0081;%x;ttyl;", time.Now().Unix()), 0)
 	}
 }
 

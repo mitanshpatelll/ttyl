@@ -12,11 +12,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rs/zerolog"
 
-	"github.com/mitanshpatelll/dmz/internal/app"
-	"github.com/mitanshpatelll/dmz/internal/cellwidth"
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/rules"
-	"github.com/mitanshpatelll/dmz/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/app"
+	"github.com/mitanshpatelll/ttyl/internal/cellwidth"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/rules"
+	"github.com/mitanshpatelll/ttyl/internal/store"
 )
 
 // testKey turns on at-rest encryption so tests cover the sealed path.
@@ -395,7 +395,7 @@ func TestLockedDoesNotLoadChats(t *testing.T) {
 	m := Model{open: &core.Chat{ID: "x"}}
 	m.inbox.Limit, m.inbox.Used = time.Minute, time.Hour
 	if m.loadChat() != nil {
-		t.Error("a locked dmz must not open (and mark read) the chat")
+		t.Error("a locked ttyl must not open (and mark read) the chat")
 	}
 }
 

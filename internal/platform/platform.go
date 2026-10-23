@@ -5,7 +5,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // Terminal is the plain (non-TUI) terminal used while linking an account.
@@ -20,6 +20,6 @@ type Account interface {
 	core.Platform
 	LoggedIn() bool
 	Login(ctx context.Context, t Terminal) error
-	// Logout unlinks dmz on the platform's side where possible and deletes the local session.
+	// Logout unlinks ttyl on the platform's side where possible and deletes the local session.
 	Logout(ctx context.Context) error
 }

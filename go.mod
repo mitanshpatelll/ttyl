@@ -1,4 +1,4 @@
-module github.com/mitanshpatelll/dmz
+module github.com/mitanshpatelll/ttyl
 
 go 1.26.4
 

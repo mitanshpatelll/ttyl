@@ -3,7 +3,7 @@
 //
 // Terminals disagree on scripts like Gujarati or Hindi (do vowel signs and conjuncts take
 // their own cell?) and on emoji sequences (is a family emoji one glyph or three?). A wrong
-// guess pushes every following character on the line and breaks the layout, so dmz probes
+// guess pushes every following character on the line and breaks the layout, so ttyl probes
 // the terminal once at startup (Calibrate) and measures everything with the result.
 package cellwidth
 

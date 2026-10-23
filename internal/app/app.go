@@ -10,9 +10,9 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/rules"
-	"github.com/mitanshpatelll/dmz/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/rules"
+	"github.com/mitanshpatelll/ttyl/internal/store"
 )
 
 // HistoryPage is how many messages a chat loads at a time.
@@ -57,7 +57,7 @@ type Inbox struct {
 	Status   map[core.PlatformID]core.StatusEvent
 	Sync     map[core.PlatformID]int
 	Receipts bool
-	Used     time.Duration // dmz time today
+	Used     time.Duration // ttyl time today
 	Limit    time.Duration // today's budget including extensions; 0 = no budget
 }
 
@@ -219,8 +219,8 @@ func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int
 
 func (a *App) Send(ctx context.Context, chat core.Chat, text string) error {
 	p, linked := a.platforms[chat.Platform]
-	if !linked { // chats stay in the store after dmz logout without --purge
-		return fmt.Errorf("%s is not linked: dmz login %s", chat.Platform, chat.Platform)
+	if !linked { // chats stay in the store after ttyl logout without --purge
+		return fmt.Errorf("%s is not linked: ttyl login %s", chat.Platform, chat.Platform)
 	}
 	msg, err := p.Send(ctx, chat.ID, text)
 	if err != nil {
@@ -232,13 +232,13 @@ func (a *App) Send(ctx context.Context, chat core.Chat, text string) error {
 	return a.store.Apply(core.BatchEvent{Platform: chat.Platform, Messages: []core.Message{msg}})
 }
 
-// RecordActive adds time spent with dmz in front of you.
+// RecordActive adds time spent with ttyl in front of you.
 func (a *App) RecordActive(now time.Time, d time.Duration) error {
 	return a.store.AddUsage(now, d, 0, 0, 0)
 }
 
-// RecordOpen counts one launch of dmz.
+// RecordOpen counts one launch of ttyl.
 func (a *App) RecordOpen(now time.Time) error { return a.store.AddUsage(now, 0, 1, 0, 0) }
 
-// Extend adds ExtensionStep to today's budget. Extensions show up in dmz stats.
+// Extend adds ExtensionStep to today's budget. Extensions show up in ttyl stats.
 func (a *App) Extend(now time.Time) error { return a.store.AddUsage(now, 0, 0, 0, 1) }

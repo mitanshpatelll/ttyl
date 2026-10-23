@@ -12,9 +12,9 @@ import (
 	"github.com/rs/zerolog"
 	"golang.org/x/sys/unix"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/rules"
-	"github.com/mitanshpatelll/dmz/internal/store"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/rules"
+	"github.com/mitanshpatelll/ttyl/internal/store"
 )
 
 // testKey turns on at-rest encryption so tests cover the sealed path.

@@ -8,8 +8,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	cw "github.com/mitanshpatelll/dmz/internal/cellwidth"
-	"github.com/mitanshpatelll/dmz/internal/core"
+	cw "github.com/mitanshpatelll/ttyl/internal/cellwidth"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // Every width below goes through cellwidth, which knows how this terminal draws Gujarati,
@@ -67,7 +67,7 @@ func (m Model) View() string {
 // sidebarTop is the app name and a dot per platform, on the sidebar shade.
 func (m Model) sidebarTop(w int) string {
 	bg := on(sidebarBg)
-	line := bg(lipgloss.NewStyle()).Render(" ") + bg(accentStyle.Bold(true)).Render("dmz")
+	line := bg(lipgloss.NewStyle()).Render(" ") + bg(accentStyle.Bold(true)).Render("ttyl")
 	ids := make([]core.PlatformID, 0, len(m.inbox.Status))
 	for id := range m.inbox.Status {
 		ids = append(ids, id)
@@ -168,19 +168,19 @@ func (m Model) viewHelp() string {
 			body = append(body, "   "+keyStyle.Render(fmt.Sprintf("%-10s", k[0]))+" "+dimStyle.Render(k[1]))
 		}
 	}
-	body = append(body, "", " "+dimStyle.Render("any key closes · run dmz stats for your week"))
+	body = append(body, "", " "+dimStyle.Render("any key closes · run ttyl stats for your week"))
 	return m.centered(panel("Keys", "", body, 54, len(body)+3, true, -1))
 }
 
 func (m Model) viewLocked() string {
 	body := []string{
 		"",
-		"  " + boldStyle.Render("Today's dmz time is used up"),
+		"  " + boldStyle.Render("Today's ttyl time is used up"),
 		"",
 		"  " + fmt.Sprintf("You spent %s here today, budget %s.", minutes(m.inbox.Used), minutes(m.inbox.Limit)),
 		"  " + "Messages keep arriving; they'll be here tomorrow.",
 		"",
-		"  " + keyHints("q", "quit", "e", "5 more minutes (counted in dmz stats)"),
+		"  " + keyHints("q", "quit", "e", "5 more minutes (counted in ttyl stats)"),
 	}
 	if m.extend.Focused() {
 		body = append(body, "", "  "+m.extend.View())

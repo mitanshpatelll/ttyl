@@ -1,4 +1,4 @@
-// Package config loads dmz settings and resolves where its data lives.
+// Package config loads ttyl settings and resolves where its data lives.
 package config
 
 import (
@@ -30,10 +30,10 @@ type Focus struct {
 	DailyMinutes int      `toml:"daily_minutes"`
 }
 
-const defaultConfig = `# dmz config
+const defaultConfig = `# ttyl config
 
 [focus]
-# Send "seen" (blue ticks) when you open a chat in dmz.
+# Send "seen" (blue ticks) when you open a chat in ttyl.
 read_receipts = false
 
 # Delivery windows (24h, local time). Messages arriving between windows are held
@@ -45,27 +45,27 @@ windows = []
 # Example: vip = ["+15551234567"]
 vip = []
 
-# Daily time budget in minutes (time with dmz focused). 0 = no budget.
-# When it runs out dmz locks; typing "extend" gives 5 more minutes.
+# Daily time budget in minutes (time with ttyl focused). 0 = no budget.
+# When it runs out ttyl locks; typing "extend" gives 5 more minutes.
 daily_minutes = 0
 
 [telegram]
 # Telegram needs your own API app (free): https://my.telegram.org → API development tools.
-# Then run: dmz login telegram
+# Then run: ttyl login telegram
 api_id = 0
 api_hash = ""
 `
 
-// Dir returns the data directory ($DMZ_HOME, or ~/Library/Application Support/dmz on macOS),
+// Dir returns the data directory ($TTYL_HOME, or ~/Library/Application Support/ttyl on macOS),
 // creating it with owner-only permissions. It holds the WhatsApp session, so keep it private.
 func Dir() (string, error) {
-	dir := os.Getenv("DMZ_HOME")
+	dir := os.Getenv("TTYL_HOME")
 	if dir == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
 			return "", err
 		}
-		dir = filepath.Join(base, "dmz")
+		dir = filepath.Join(base, "ttyl")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
@@ -73,16 +73,16 @@ func Dir() (string, error) {
 	return dir, os.Chmod(dir, 0o700)
 }
 
-// MediaDir is where opened attachments are cached: $DMZ_HOME/media, or ~/Library/Caches/dmz/media.
+// MediaDir is where opened attachments are cached: $TTYL_HOME/media, or ~/Library/Caches/ttyl/media.
 func MediaDir() (string, error) {
-	if home := os.Getenv("DMZ_HOME"); home != "" {
+	if home := os.Getenv("TTYL_HOME"); home != "" {
 		return filepath.Join(home, "media"), nil
 	}
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "dmz", "media"), nil
+	return filepath.Join(base, "ttyl", "media"), nil
 }
 
 // Load reads config.toml from dir, writing the default file on first run.

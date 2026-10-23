@@ -1,7 +1,7 @@
 // Package instagram adapts instameow (mautrix-meta's client for Instagram's private web
-// protocol) to dmz.
+// protocol) to ttyl.
 //
-// Experimental. dmz logs in with session cookies copied from a browser, loads the inbox the
+// Experimental. ttyl logs in with session cookies copied from a browser, loads the inbox the
 // web app gets (recent threads with their latest messages), then follows the live socket.
 // Older history is not loaded, and end-to-end encrypted chats are not visible.
 package instagram
@@ -27,9 +27,9 @@ import (
 	"go.mau.fi/mautrix-meta/pkg/messagix/types"
 	"go.mau.fi/util/jsontime"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/platform"
-	"github.com/mitanshpatelll/dmz/internal/secret"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/platform"
+	"github.com/mitanshpatelll/ttyl/internal/secret"
 )
 
 const (
@@ -42,8 +42,8 @@ type Config struct {
 	Log   zerolog.Logger
 }
 
-// thread is what dmz needs about an Instagram thread. Instagram has three IDs per thread:
-// the numeric thread key (dmz's chat ID), the "chat" IGID that live deltas name, and the
+// thread is what ttyl needs about an Instagram thread. Instagram has three IDs per thread:
+// the numeric thread key (ttyl's chat ID), the "chat" IGID that live deltas name, and the
 // long thread IGID that sending and marking read need.
 type thread struct {
 	key      int64
@@ -115,9 +115,9 @@ suspended. Try it with a secondary account first, and keep usage low.
 `
 
 const howTo = `Copy cookies from a browser where you are logged in to instagram.com:
-  1. Log in to instagram.com in a private window (keep that login only for dmz).
+  1. Log in to instagram.com in a private window (keep that login only for ttyl).
   2. Developer tools → Application (Safari: Storage) → Cookies → https://www.instagram.com
-  3. Paste each value below. Then close the window; don't click "Log out" or dmz loses access.
+  3. Paste each value below. Then close the window; don't click "Log out" or ttyl loses access.
 
 `
 
@@ -174,7 +174,7 @@ func (c *Client) open(ctx context.Context, ck *cookies.Cookies) (*instameow.Clie
 	cli := instameow.NewClient(instameow.ClientParams{
 		Cookies:       ck,
 		Log:           c.log.With().Str("component", "instameow").Logger(),
-		DisableTyping: true, // dmz never sends typing indicators
+		DisableTyping: true, // ttyl never sends typing indicators
 	})
 	_, mailbox, err := cli.LoadIndex(ctx)
 	if err != nil {
@@ -195,7 +195,7 @@ func explain(err error) error {
 	case errors.Is(err, httpclient.ErrAccountSuspended):
 		return errors.New("Instagram says this account is suspended")
 	case errors.Is(err, httpclient.ErrTokenInvalidated):
-		return errors.New("the cookies are not valid (any more): log in again in the browser and run dmz login instagram")
+		return errors.New("the cookies are not valid (any more): log in again in the browser and run ttyl login instagram")
 	case errors.Is(err, httpclient.ErrRateLimited):
 		return errors.New("Instagram is rate limiting this account: wait a while before trying again")
 	}
@@ -280,7 +280,7 @@ func (c *Client) Logout(context.Context) error {
 	if err := c.cfg.Vault.Delete(cookiesKey); err != nil {
 		return err
 	}
-	return errors.New("cookies deleted from dmz; to end that session for good, log it out in Instagram: Accounts Center → Password and security → Where you're logged in")
+	return errors.New("cookies deleted from ttyl; to end that session for good, log it out in Instagram: Accounts Center → Password and security → Where you're logged in")
 }
 
 func (c *Client) handleEvent(ctx context.Context, evt slidetypes.ClientEvent) error {
@@ -291,7 +291,7 @@ func (c *Client) handleEvent(ctx context.Context, evt slidetypes.ClientEvent) er
 		c.status(core.StateDisconnected, "reconnecting")
 	case *slidetypes.AuthError:
 		c.log.Error().Err(e.Error).Msg("instagram auth")
-		c.status(core.StateLoggedOut, "cookies stopped working, run dmz login instagram")
+		c.status(core.StateLoggedOut, "cookies stopped working, run ttyl login instagram")
 	case *slidetypes.ResnapshotRequired:
 		go c.reloadMailbox(ctx)
 	case *slidetypes.Delta:
@@ -440,7 +440,7 @@ func (c *Client) handleDelta(ctx context.Context, d *slidetypes.Delta) {
 	}
 	key, ok := c.threadForDelta(d, msg)
 	if !ok {
-		// A thread dmz hasn't seen yet: reload the inbox to learn it.
+		// A thread ttyl hasn't seen yet: reload the inbox to learn it.
 		c.log.Debug().Str("thread", d.ThreadIGID).Str("type", d.TypeName).Msg("instagram delta for unknown thread")
 		go c.reloadMailbox(ctx)
 		return
@@ -682,7 +682,7 @@ func (c *Client) MarkRead(ctx context.Context, chat core.Chat, msgs []core.Messa
 			last = m
 		}
 	}
-	// The web app sends the read marker in two steps; so does dmz.
+	// The web app sends the read marker in two steps; so does ttyl.
 	meta := slidetypes.MarkReadMetadata{IGThreadIGID: threadID}
 	if _, err := cli.MarkRead(ctx, &slidetypes.MarkReadRequest{Metadata: meta, Data: slidetypes.MarkReadData{MessageID: last.ID, ItemID: ptr("")}}); err != nil {
 		return err

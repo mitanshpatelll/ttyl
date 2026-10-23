@@ -1,103 +1,113 @@
-# dmz
+<div align="center">
 
-Your DMs in the terminal, without the feed.
+# ttyl 💬
 
-WhatsApp, Telegram and Instagram chats in one keyboard-driven TUI. No stories, no reels,
-no channels, no "seen" unless you turn it on. Media is a placeholder until you ask for it.
-Messages can arrive in batches at times you choose, and a daily budget locks dmz when
-your time is up.
+**your DMs in the terminal. no feed. no reels. no "seen". talk to you later.**
 
-dmz does not reduce screen time (a terminal is a screen). It removes the parts of messaging
-apps built to keep you scrolling, so answering a message stays answering a message.
+WhatsApp, Telegram and Instagram chats in one keyboard-only TUI,
+built for people who want to reply to their friends without losing an hour to the scroll.
 
-| Platform  | How dmz connects                                    | Status        |
-|-----------|-----------------------------------------------------|---------------|
-| WhatsApp  | Linked device, QR code (whatsmeow)                  | stable        |
-| Telegram  | Official API with your own api_id (gotd)            | works, young  |
-| Instagram | Browser session cookies, private protocol (instameow) | experimental |
+![ttyl showing a group chat](docs/screenshot.png)
 
-## Install
+<sub>sample data · Ghostty · dark theme</sub>
 
-Needs Go 1.26+ and Xcode Command Line Tools (SQLite uses cgo). Built and tested on macOS;
-Linux is untested (it would need a Secret Service keyring for the keys).
+</div>
+
+---
+
+## why tho
+
+You open Instagram to answer one DM. Forty minutes later you've watched 63 reels and still
+haven't replied. ttyl fixes the "open app → get farmed" loop:
+
+- **only conversations.** stories, reels, channels, status updates: never fetched, never shown.
+- **no "seen".** read receipts are off by default. reply when *you* want.
+- **media stays text.** `[photo]`, `[voice 0:12]`, `[reel] instagram.com/…`. nothing autoplays.
+  press `o` when you actually want to look.
+- **messages on your schedule.** set delivery windows (say 12:30 and 19:00) and everything in
+  between waits. your people (VIPs) still get through.
+- **a daily budget.** set 30 minutes; when it's gone, ttyl locks. you *can* type `extend`,
+  but it's counted, and `ttyl stats` will show you. no judgement. ok, a little.
+
+It won't cut your screen time (a terminal is still a screen 💀), but it cuts the stuff that was
+never the point.
+
+## what works
+
+| | how ttyl connects | status |
+|---|---|---|
+| **WhatsApp** | linked device, scan a QR code | ✅ stable |
+| **Telegram** | official API with your own `api_id` | ✅ works |
+| **Instagram** | your browser session cookies | 🧪 experimental |
+
+- Discord-style chat: who said what is obvious (colored names, avatars, "Today at 17:15")
+- unread line, jump to first unread, search chats with `/`
+- edits, unsends and reactions show up; media downloads only when you press `o`
+- Gujarati, Hindi and emoji render correctly: ttyl measures how *your* terminal draws text at startup
+- messages encrypted on disk, sessions and keys in the macOS Keychain
+
+## install
+
+You need **Go 1.26+** and **Xcode Command Line Tools** (`xcode-select --install`). Built and
+tested on macOS.
 
 ```sh
-make build      # bin/dmz
-make install    # into $GOBIN
-make test
+git clone https://github.com/mitanshpatelll/ttyl
+cd ttyl
+make install        # puts `ttyl` in your $GOBIN
 ```
 
-## First run
+The first build takes a while (Telegram and Instagram libraries are big). After that it's quick.
+
+## get going
 
 ```sh
-dmz                    # nothing linked yet: starts WhatsApp linking
-dmz login telegram
-dmz login instagram
+ttyl                      # first run links WhatsApp: scan the QR
+ttyl login telegram       # phone number → code → 2FA if you have it
+ttyl login instagram      # paste a few cookies (read the warning first)
 ```
 
-**WhatsApp:** scan the QR code from WhatsApp → Settings → Linked devices → Link a device.
-Your chats fill in as history syncs (a few minutes the first time). Your phone must come
-online at least every ~14 days or WhatsApp unlinks companion devices.
+**WhatsApp:** phone → Settings → Linked devices → Link a device → scan. Your chats sync in a
+few minutes. Your phone has to come online at least every ~14 days or WhatsApp unlinks it.
 
-**Telegram:** create a free API app at <https://my.telegram.org> → API development tools, put
-`api_id` and `api_hash` under `[telegram]` in the config, then `dmz login telegram` asks for
-your phone number, the code Telegram sends, and your two-step password if you have one.
-dmz shows up as "dmz" under Telegram → Settings → Devices.
+**Telegram:** grab a free `api_id` and `api_hash` at <https://my.telegram.org> → *API development
+tools*, put them in the config (below), then `ttyl login telegram`.
 
-**Instagram (experimental):** Meta does not allow unofficial clients; an account can be
-challenged, rate limited or suspended. Try a secondary account first. `dmz login instagram`
-asks for cookies from a browser: log in to instagram.com in a private window, open the
-developer tools → Application (Safari: Storage) → Cookies, copy `sessionid`, `csrftoken`
-and `ds_user_id` (optionally `mid`, `ig_did`, `rur`), then close the window without logging
-out.
+**Instagram (experimental):** Meta doesn't allow unofficial clients, so an account *can* get
+challenged or suspended. **Try a secondary account first.** Log in to instagram.com in a private
+window, open devtools → Application → Cookies, copy `sessionid`, `csrftoken`, `ds_user_id`, then
+close the window *without* logging out.
 
-## Using it
+## keys
 
-Press `?` for every key. The essentials:
-
-| Key | Action |
+| key | does |
 |---|---|
-| `j` / `k` | move in the inbox, select a message in a chat |
-| `enter` | open chat / send |
+| `j` / `k` | move · select a message |
+| `enter` | open a chat · send |
 | `i` | reply |
-| `o` | open the selected message's attachment |
-| `/` | filter chats by name |
-| `esc` | back / stop typing |
-| `q`, `ctrl+c` | quit |
-
-Moving past the oldest message in a chat loads older ones.
+| `o` | open the selected photo / voice note / file |
+| `/` | search chats |
+| `g` / `G` | top / bottom (going past the top loads older messages) |
+| `esc` | back · stop typing |
+| `?` | every key |
+| `q` | quit |
 
 ```sh
-dmz stats          # last 7 days: time, opens, sent, received, extensions
-dmz stats 30
-dmz logout telegram [--purge]   # --purge also deletes its stored messages
-dmz version
+ttyl stats                # your week: time, opens, sent, received, "extend"s
+ttyl stats 30
+ttyl logout telegram      # add --purge to also delete its stored messages
+ttyl version
 ```
 
-## Focus features
+## config
 
-- **No read receipts** by default. Reading in dmz only moves a local marker.
-- **No feeds.** WhatsApp status updates and channels, Telegram broadcast channels, Instagram
-  stories: never stored, never shown.
-- **Media as text:** `[photo]`, `[voice 0:12]`, `[file report.pdf]`. Shared reels show as
-  `[reel]` plus the link, never a preview. `o` downloads on demand; images, video, audio, PDF
-  and text open in their default app, anything else (scripts, apps, archives) is only revealed
-  in Finder, and every file gets macOS's quarantine flag.
-- **Delivery windows:** messages that arrive between windows stay hidden until the next one.
-  VIPs come through immediately.
-- **Daily budget:** only time with dmz focused counts. When it runs out, dmz locks; type
-  `extend` for five more minutes. Extensions show up in `dmz stats`.
-- No typing indicators, no notifications.
-
-## Config
-
-`~/Library/Application Support/dmz/config.toml`, created on first run:
+`~/Library/Application Support/ttyl/config.toml` (created on first run):
 
 ```toml
 [focus]
 read_receipts = false          # true = send "seen" when you open a chat
-windows = ["12:30", "19:00"]   # hold messages until these times; [] = live
-vip = ["+15551234567"]         # WhatsApp numbers that bypass delivery windows
+windows = ["12:30", "19:00"]   # hold messages until these times · [] = live
+vip = ["+919876543210"]        # WhatsApp numbers that skip the wait
 daily_minutes = 30             # 0 = no budget
 
 [telegram]
@@ -105,52 +115,55 @@ api_id = 1234567
 api_hash = "0123456789abcdef0123456789abcdef"
 ```
 
-## Data and security
+## privacy & security
 
-Everything lives in `~/Library/Application Support/dmz/` (or `$DMZ_HOME`), directory `0700`,
-files `0600`:
+Everything stays on your Mac, in `~/Library/Application Support/ttyl/` (owner-only):
 
-| File | What |
-|---|---|
-| `whatsapp.db` | WhatsApp session keys. **Anyone with this file is logged in as you.** |
-| `dmz.db` | your messages; text, names and media handles encrypted (XChaCha20-Poly1305) |
-| `telegram.json` | Telegram peers and catch-up marks (no secrets) |
-| `dmz.log` | logs; `DMZ_DEBUG=1` for verbose |
+- **`whatsapp.db`** is your WhatsApp login. Anyone with this file can read and send your messages.
+  Never sync it, never commit it.
+- **`ttyl.db`** holds your messages. Text, names and media links are encrypted
+  (XChaCha20-Poly1305) with a key in your macOS Keychain. Phone numbers and timestamps are not.
+- the **Telegram session** and **Instagram cookies** live in the Keychain (service `ttyl`).
+- anything a contact sends is cleaned of terminal escape codes before it's shown, and opened
+  files get macOS's quarantine flag. Scripts and apps are only revealed in Finder, never run.
 
-The message store key, the Telegram session and the Instagram cookies are in the macOS
-Keychain (service `dmz`). Phone numbers, user IDs and timestamps in `dmz.db` are not
-encrypted, and `whatsapp.db` is whatsmeow's own unencrypted store. Opened attachments are
-cached in `~/Library/Caches/dmz/media` for 7 days.
+ttyl uses unofficial protocols for WhatsApp ([whatsmeow](https://github.com/tulir/whatsmeow)) and
+Instagram ([mautrix-meta](https://github.com/mautrix/meta)). Personal, low-volume use is the
+norm for these, but it isn't sanctioned by Meta. Use it at your own risk.
 
-Never commit or sync the data folder.
+## known limits
 
-## Known limits
+- sending is text only (no photos, replies or reactions *from* ttyl, yet)
+- reading in ttyl doesn't clear unread on your phone unless `read_receipts = true`
+- Telegram: reactions aren't shown; chats are caught up from your 100 most recent
+- Instagram: recent messages + live only, no deep history, no end-to-end encrypted chats
+- VIPs are WhatsApp numbers only
 
-- Text only when sending; no reactions, replies or media from dmz.
-- WhatsApp: reading in dmz doesn't clear unread on the phone unless `read_receipts = true`.
-- Telegram: reactions aren't shown (Telegram sends counts, not people). Missed messages
-  are caught up from the 100 most recent chats on connect; edits and deletes made while dmz
-  was closed are not.
-- Instagram: only the inbox snapshot plus live messages (no deep history), no end-to-end
-  encrypted chats, and Meta changes the protocol often.
-- VIPs are WhatsApp numbers only.
-
-## How it fits together
+## how it's built
 
 ```
-cmd/dmz              commands, setup, account wiring
-internal/core        platform-neutral chats, messages, events, Platform interface
-internal/platform/*  whatsapp (whatsmeow), telegram (gotd), instagram (instameow)
-internal/app         events → store, focus rules, media opening, usage
-internal/store       SQLite: migrations, encryption, visibility queries
+cmd/ttyl             commands, setup, account linking
+internal/core        chats, messages, events: the same shape for every app
+internal/platform/*  whatsapp (whatsmeow) · telegram (gotd) · instagram (instameow)
+internal/app         events → store, focus rules, opening media, usage
+internal/store       SQLite with migrations and at-rest encryption
 internal/rules       delivery windows
+internal/cellwidth   how wide text really is in your terminal
 internal/secret      Keychain
-internal/tui         Bubble Tea UI
+internal/tui         the UI (Bubble Tea)
 ```
 
-Each adapter turns its protocol into `core` events; the app writes them to one store and
-the UI reads from it. Delivery windows and VIPs are applied when querying, so nothing is
+Each app's adapter turns its protocol into the same events; ttyl stores them in one database
+and the UI reads from there. Delivery windows and VIPs are applied when reading, so nothing is
 ever rewritten to hide or release messages.
 
-Built on [whatsmeow](https://github.com/tulir/whatsmeow), [gotd](https://github.com/gotd/td),
-[mautrix-meta](https://github.com/mautrix/meta) and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+```sh
+make test           # vet + tests
+TTYL_GALLERY=1 go test -run Gallery -v ./internal/tui   # print every screen
+```
+
+Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea),
+[whatsmeow](https://github.com/tulir/whatsmeow), [gotd](https://github.com/gotd/td) and
+[mautrix-meta](https://github.com/mautrix/meta). 🫶
+
+<div align="center"><sub>ttyl. go touch grass. 🌱</sub></div>

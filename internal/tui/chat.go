@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	cw "github.com/mitanshpatelll/dmz/internal/cellwidth"
-	"github.com/mitanshpatelll/dmz/internal/core"
+	cw "github.com/mitanshpatelll/ttyl/internal/cellwidth"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 const (
@@ -90,12 +90,12 @@ func (m Model) viewNoChat(w, h int) []string {
 	if !m.inbox.Next.IsZero() {
 		delivery = fmt.Sprintf("held until %s (%d waiting), VIPs come through", m.inbox.Next.Format("15:04"), m.inbox.Held)
 	}
-	receipts := "off, nobody sees \"seen\" from dmz"
+	receipts := "off, nobody sees \"seen\" from ttyl"
 	if m.inbox.Receipts {
 		receipts = "on"
 	}
 	block := []string{
-		accentStyle.Bold(true).Render("dmz"),
+		accentStyle.Bold(true).Render("ttyl"),
 		"",
 		boldStyle.Render("Your messages, without the feed."),
 		dimStyle.Render("Pick a chat with ") + keyStyle.Render("j/k") + dimStyle.Render(" and ") + keyStyle.Render("enter") + dimStyle.Render("."),

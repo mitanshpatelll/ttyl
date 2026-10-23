@@ -24,8 +24,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"rsc.io/qr"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
-	"github.com/mitanshpatelll/dmz/internal/platform"
+	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/platform"
 )
 
 type Client struct {
@@ -40,7 +40,7 @@ type Client struct {
 
 // New opens the session database at dbPath. Session keys live there: anyone with this file is logged in as you.
 func New(ctx context.Context, dbPath string, log zerolog.Logger) (*Client, error) {
-	store.SetOSInfo("dmz", [3]uint32{0, 1, 0})
+	store.SetOSInfo("ttyl", [3]uint32{0, 1, 0})
 	wlog := waLog.Zerolog(log.With().Str("component", "whatsmeow").Logger())
 	container, err := sqlstore.New(ctx, "sqlite3", "file:"+dbPath+"?_foreign_keys=on&_busy_timeout=5000", wlog)
 	if err != nil {
@@ -76,7 +76,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	return c.cli.Connect()
 }
 
-// Login links dmz as a new companion device by QR code, drawing each code to w. Blocks until paired.
+// Login links ttyl as a new companion device by QR code, drawing each code to w. Blocks until paired.
 func (c *Client) Login(ctx context.Context, w platform.Terminal) error {
 	qrs, err := c.cli.GetQRChannel(ctx)
 	if err != nil {
@@ -100,7 +100,7 @@ func (c *Client) Login(ctx context.Context, w platform.Terminal) error {
 		switch item.Event {
 		case whatsmeow.QRChannelEventCode:
 			fmt.Fprint(w, "\033[H\033[2J")
-			fmt.Fprintln(w, "Link dmz to WhatsApp")
+			fmt.Fprintln(w, "Link ttyl to WhatsApp")
 			fmt.Fprintln(w, "Phone: WhatsApp → Settings → Linked devices → Link a device, then scan:")
 			fmt.Fprintln(w)
 			qrterminal.GenerateHalfBlock(item.Code, qr.L, w)
@@ -116,7 +116,7 @@ func (c *Client) Login(ctx context.Context, w platform.Terminal) error {
 	}
 }
 
-// Logout unlinks dmz from the phone (needs a connection) and deletes the local session either way.
+// Logout unlinks ttyl from the phone (needs a connection) and deletes the local session either way.
 func (c *Client) Logout(ctx context.Context) error {
 	if !c.LoggedIn() {
 		return nil
@@ -130,7 +130,7 @@ func (c *Client) Logout(ctx context.Context) error {
 	if err := c.cli.Store.Delete(ctx); err != nil {
 		return err
 	}
-	return errors.New("could not reach WhatsApp; local session deleted, also remove dmz under Linked devices on your phone")
+	return errors.New("could not reach WhatsApp; local session deleted, also remove ttyl under Linked devices on your phone")
 }
 
 // PhoneToChatID turns "+1 555-123-4567" into the DM chat ID "15551234567@s.whatsapp.net".
@@ -226,11 +226,11 @@ func (c *Client) handle(evt any) {
 	case *events.Disconnected:
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: "reconnecting"})
 	case *events.StreamReplaced:
-		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: "another dmz took over this session"})
+		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: "another ttyl took over this session"})
 	case *events.ConnectFailure:
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: v.Reason.String()})
 	case *events.LoggedOut:
-		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateLoggedOut, Detail: "unlinked from phone, restart dmz to link again"})
+		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateLoggedOut, Detail: "unlinked from phone, restart ttyl to link again"})
 	case *events.AppStateSyncComplete:
 		go c.refreshNames()
 	}
@@ -378,7 +378,7 @@ func pickName(info types.ContactInfo, pushName string) string {
 	return ""
 }
 
-// skipChat drops status updates (stories) and channels: feeds are exactly what dmz is avoiding.
+// skipChat drops status updates (stories) and channels: feeds are exactly what ttyl is avoiding.
 func skipChat(jid types.JID) bool {
 	return jid == types.StatusBroadcastJID || jid.Server == types.NewsletterServer
 }

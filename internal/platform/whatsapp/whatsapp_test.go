@@ -14,7 +14,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 func TestDescribe(t *testing.T) {

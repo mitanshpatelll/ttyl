@@ -12,7 +12,7 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const service = "dmz"
+const service = "ttyl"
 
 // Vault scopes secrets to one data directory, so a test or second profile never shares keys.
 type Vault struct{ dir string }
@@ -40,9 +40,42 @@ func (v Vault) Delete(name string) error {
 	return err
 }
 
+// CopyFrom copies secrets kept under an older service name and data directory into this
+// vault, keeping any value already here. The old items stay until DeleteFrom.
+func (v Vault) CopyFrom(oldService, oldDir string, names ...string) error {
+	for _, name := range names {
+		value, err := keyring.Get(oldService, fmt.Sprintf("%s (%s)", name, oldDir))
+		if errors.Is(err, keyring.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		if _, ok, err := v.Get(name); err != nil {
+			return err
+		} else if !ok {
+			if err := v.Set(name, value); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// DeleteFrom removes secrets kept under an older service name and data directory.
+func DeleteFrom(oldService, oldDir string, names ...string) error {
+	for _, name := range names {
+		err := keyring.Delete(oldService, fmt.Sprintf("%s (%s)", name, oldDir))
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // StoreKey returns the 32-byte message store key, creating it on first use, and where it lives.
 // Only on platforms without a keychain does it fall back to a 0600 key file next to the data,
-// which protects copies of dmz.db made without the key file, and nothing more.
+// which protects copies of ttyl.db made without the key file, and nothing more.
 func (v Vault) StoreKey() (key []byte, where string, err error) {
 	encoded, ok, err := v.Get("store-key")
 	switch {

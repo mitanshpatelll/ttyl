@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // testKey turns on at-rest encryption so tests cover the sealed path.

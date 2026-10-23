@@ -14,7 +14,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // migrations[i] upgrades the schema from user_version i to i+1. Never edit a shipped entry.
@@ -61,7 +61,7 @@ var migrations = []string{
 	// 3: settings (key check and encryption state)
 	`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 
-	// 4: daily usage for the time budget and dmz stats
+	// 4: daily usage for the time budget and ttyl stats
 	`CREATE TABLE usage (
 		day        TEXT    PRIMARY KEY, -- local date, YYYY-MM-DD
 		seconds    INTEGER NOT NULL DEFAULT 0,
@@ -110,7 +110,7 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if version > len(migrations) {
-		return fmt.Errorf("database is schema v%d, this dmz only knows v%d: update dmz", version, len(migrations))
+		return fmt.Errorf("database is schema v%d, this ttyl only knows v%d: update ttyl", version, len(migrations))
 	}
 	for ; version < len(migrations); version++ {
 		tx, err := db.Begin()

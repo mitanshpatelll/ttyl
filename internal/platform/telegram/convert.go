@@ -8,7 +8,7 @@ import (
 
 	"github.com/gotd/td/tg"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 // Chat IDs: "u<id>" users, "c<id>" basic groups, "g<id>" channels and supergroups.
@@ -104,7 +104,7 @@ func (c *Client) chat(id string) core.Chat {
 	return core.Chat{Platform: core.Telegram, ID: id, Name: p.Name, IsGroup: p.Group}
 }
 
-// convert maps a Telegram message to dmz. Service messages, channel posts and empty
+// convert maps a Telegram message to ttyl. Service messages, channel posts and empty
 // messages are skipped.
 func (c *Client) convert(m tg.MessageClass) (core.Message, bool) {
 	msg, ok := m.(*tg.Message)

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mitanshpatelll/dmz/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/core"
 )
 
 func TestUsage(t *testing.T) {
