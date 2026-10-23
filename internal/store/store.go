@@ -435,6 +435,16 @@ func (s *Store) DeletePlatform(platform core.PlatformID) error {
 	return tx.Commit()
 }
 
+// LastRead is the chat's local read marker: incoming messages after it are new.
+func (s *Store) LastRead(platform core.PlatformID, chatID string) (time.Time, error) {
+	var ms int64
+	err := s.db.QueryRow(`SELECT last_read_ts FROM chats WHERE platform = ? AND id = ?`, platform, chatID).Scan(&ms)
+	if errors.Is(err, sql.ErrNoRows) || ms == 0 { // never read here: no "new messages" line
+		return time.Time{}, nil
+	}
+	return time.UnixMilli(ms), err
+}
+
 // MarkRead moves a chat's local read marker forward. It never sends anything to the platform.
 func (s *Store) MarkRead(platform core.PlatformID, chatID string, until time.Time) error {
 	return markRead(s.db, platform, chatID, until)

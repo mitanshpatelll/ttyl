@@ -33,9 +33,10 @@ type (
 		err   error
 	}
 	messagesMsg struct {
-		chatKey string
-		msgs    []core.Message
-		err     error
+		chatKey  string
+		msgs     []core.Message
+		lastRead time.Time // read marker before this open: later incoming messages are new
+		err      error
 	}
 	sentMsg struct {
 		chatKey, text string
@@ -64,12 +65,18 @@ type Model struct {
 	offset   int
 	selected string // chat under the cursor, kept across reloads
 
-	open     *core.Chat
-	messages []core.Message
-	limit    int   // how many messages of the open chat are loaded
-	sel      int   // selected message; the newest one follows new arrivals
-	starts   []int // first viewport line of each message, set by renderChat
-	chatView viewport.Model
+	open       *core.Chat
+	messages   []core.Message
+	limit      int       // how many messages of the open chat are loaded
+	sel        int       // selected message; the newest one follows new arrivals
+	starts     []int     // first viewport line of each message, set by renderChat
+	newFrom    time.Time // the "new messages" line goes before the first incoming message after this
+	newFromSet bool
+	newLine    int // viewport line of that divider, -1 if none
+	chatView   viewport.Model
+
+	bubbles     map[string][]string // rendered bubbles, keyed by content and state
+	bubbleWidth int
 
 	filter  textinput.Model
 	compose textinput.Model
@@ -86,11 +93,11 @@ type Model struct {
 
 func New(a *app.App) Model {
 	filter := textinput.New()
-	filter.Prompt = "/ "
-	filter.Placeholder = "filter chats"
+	filter.Prompt = ""
+	filter.Placeholder = "search chats"
 	compose := textinput.New()
-	compose.Prompt = "> "
-	compose.Placeholder = "message"
+	compose.Prompt = ""
+	compose.Placeholder = "Write a message…"
 	compose.CharLimit = 4096
 	extend := textinput.New()
 	extend.Prompt = "> "
@@ -157,8 +164,8 @@ func (m Model) loadChat() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		msgs, err := a.Open(ctx, chat, time.Now(), limit)
-		return messagesMsg{chatKey(chat), msgs, err}
+		msgs, lastRead, err := a.Open(ctx, chat, time.Now(), limit)
+		return messagesMsg{chatKey(chat), msgs, lastRead, err}
 	}
 }
 
@@ -242,6 +249,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			keep = m.messages[m.sel].ID
 		}
 		m.messages = msg.msgs
+		firstLoad := !m.newFromSet
+		if firstLoad { // keep the "new messages" line where it was while the chat stays open
+			m.newFrom, m.newFromSet = msg.lastRead, true
+		}
 		m.sel = len(m.messages) - 1
 		for i, x := range m.messages {
 			if x.ID == keep {
@@ -250,6 +261,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.renderChat()
 		m.showSelected()
+		if firstLoad && m.newLine >= 0 {
+			// Opening a chat with unread messages starts at the first one, like the phone apps.
+			for i, x := range m.messages {
+				if !x.FromMe && x.Timestamp.After(m.newFrom) {
+					m.sel = i
+					break
+				}
+			}
+			m.renderChat()
+			m.chatView.SetYOffset(max(0, m.newLine-1))
+		}
 		m.clearUnread(msg.chatKey)
 		return m, nil
 
@@ -464,6 +486,7 @@ func (m *Model) openSelected(f focus) tea.Cmd {
 	if m.open == nil || chatKey(*m.open) != chatKey(chat) {
 		m.open = &chat
 		m.messages, m.starts, m.sel = nil, nil, -1
+		m.newFrom, m.newFromSet = time.Time{}, false
 		m.limit = app.HistoryPage
 		m.chatView.SetContent("")
 		m.compose.Reset()
@@ -560,9 +583,9 @@ func (m *Model) scrollInbox() {
 func (m *Model) layout() {
 	rw, ih := m.rightInnerWidth(), m.innerHeight()
 	m.chatView.Width = rw
-	m.chatView.Height = max(1, ih-3) // title, divider, composer
-	m.compose.Width = max(1, rw-len(m.compose.Prompt)-1)
-	m.filter.Width = max(1, m.leftInnerWidth()-len(m.filter.Prompt)-1)
+	m.chatView.Height = max(1, ih-2) // divider and composer below
+	m.compose.Width = max(1, rw-5)
+	m.filter.Width = max(1, m.leftInnerWidth()-5)
 	m.renderChat()
 	m.showSelected()
 	m.scrollInbox()

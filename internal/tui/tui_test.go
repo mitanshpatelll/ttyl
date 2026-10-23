@@ -208,7 +208,7 @@ func TestChatSelectionMediaAndPaging(t *testing.T) {
 		t.Fatalf("loaded %d, sel %d", len(m.messages), m.sel)
 	}
 	view := m.View()
-	for _, want := range []string{"[photo]", "[deleted]", "(edited)", "👍", "▌"} {
+	for _, want := range []string{"[photo]", "[deleted]", "edited", "👍", "▌", "┏"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("chat view missing %q:\n%s", want, view)
 		}
@@ -397,4 +397,33 @@ func TestLockedDoesNotLoadChats(t *testing.T) {
 	if m.loadChat() != nil {
 		t.Error("a locked dmz must not open (and mark read) the chat")
 	}
+}
+
+func TestOpeningJumpsToFirstUnread(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	start := time.Now().Add(-time.Hour)
+	var msgs []core.Message
+	for i := range 40 {
+		msgs = append(msgs, core.Message{Platform: core.WhatsApp, ChatID: "c", ID: fmt.Sprint(i), SenderID: "c", SenderName: "Ann",
+			Timestamp: start.Add(time.Duration(i) * time.Minute), Kind: core.KindText, Body: fmt.Sprintf("message %d", i)})
+	}
+	st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: "c", Name: "Ann"}}, Messages: msgs,
+		ReadUpTo: map[string]time.Time{"c": start.Add(29 * time.Minute)}}) // 30..39 unread
+	r, _ := rules.New(nil)
+	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, key("enter"))
+
+	if m.messages[m.sel].ID != "30" {
+		t.Errorf("selected %q, want the first unread (30)", m.messages[m.sel].ID)
+	}
+	if !strings.Contains(m.View(), "10 new messages") {
+		t.Errorf("divider not in view:\n%s", m.View())
+	}
+	checkFits(t, m, "jump to unread")
 }

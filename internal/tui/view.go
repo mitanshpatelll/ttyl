@@ -14,16 +14,10 @@ import (
 
 var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp", core.Telegram: "Telegram", core.Instagram: "Instagram"}
 
-// platformBadges mark each inbox row once chats come from more than one platform.
-var platformBadges = map[core.PlatformID]string{
-	core.WhatsApp:  lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}).Render("WA"),
-	core.Telegram:  lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#0969DA", Dark: "#58A6FF"}).Render("TG"),
-	core.Instagram: lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#BF3989", Dark: "#F778BA"}).Render("IG"),
-}
-
-// Sizes: one header line, one footer line, two bordered panes in between.
-func (m Model) leftInnerWidth() int  { return min(max(m.width*34/100, 24), 44) - 2 }
-func (m Model) rightInnerWidth() int { return max(10, m.width-m.leftInnerWidth()-4) }
+// Layout: one header line, two titled panels, one footer line.
+func (m Model) leftWidth() int       { return min(max(m.width*32/100, 28), 46) }
+func (m Model) leftInnerWidth() int  { return m.leftWidth() - 2 }
+func (m Model) rightInnerWidth() int { return max(10, m.width-m.leftWidth()-2) }
 func (m Model) innerHeight() int     { return max(4, m.height-4) }
 
 func (m Model) filterShown() bool { return m.focus == focusFilter || m.filter.Value() != "" }
@@ -47,12 +41,55 @@ func (m Model) View() string {
 	if m.help {
 		return m.viewHelp()
 	}
-	lw, rw, ih := m.leftInnerWidth(), m.rightInnerWidth(), m.innerHeight()
-	left := paneStyle(m.focus == focusInbox || m.focus == focusFilter).Width(lw).Height(ih).Render(m.viewInbox(lw, ih))
-	right := paneStyle(m.focus == focusChat || m.focus == focusCompose).Width(rw).Height(ih).Render(m.viewChat(rw, ih))
+	ih := m.innerHeight()
+	inboxActive := m.focus == focusInbox || m.focus == focusFilter
+	left := panel("Inbox", m.inboxSummary(), strings.Split(m.viewInbox(m.leftInnerWidth(), ih), "\n"), m.leftWidth(), ih+2, inboxActive, -1)
+	right := m.viewChatPanel(ih)
 	return lipgloss.JoinVertical(lipgloss.Left, m.viewHeader(), lipgloss.JoinHorizontal(lipgloss.Top, left, right), m.viewFooter())
 }
 
+// panel draws a rounded box of w×h cells with the title set into the top border. A divider
+// index >= 0 turns that body line into a ├──┤ rule.
+func panel(title, right string, body []string, w, h int, active bool, divider int) string {
+	border := lipgloss.NewStyle().Foreground(subtle)
+	titleStyle := boldStyle
+	if active {
+		border = border.Foreground(accent)
+		titleStyle = titleStyle.Foreground(accent)
+	}
+	inner := w - 2
+	t := " " + titleStyle.Render(title) + " "
+	r := ""
+	if right != "" {
+		r = " " + right + " "
+	}
+	fill := w - 3 - lipgloss.Width(t) - lipgloss.Width(r)
+	if fill < 1 {
+		r = ""
+		t = ansi.Truncate(t, max(0, w-4), "… ")
+		fill = max(0, w-3-lipgloss.Width(t))
+	}
+	lines := []string{border.Render("╭─") + t + border.Render(strings.Repeat("─", fill)) + r + border.Render("╮")}
+	for i := 0; i < h-2; i++ {
+		if i == divider {
+			lines = append(lines, border.Render("├"+strings.Repeat("─", inner)+"┤"))
+			continue
+		}
+		line := ""
+		if i < len(body) {
+			line = body[i]
+		}
+		if lipgloss.Width(line) > inner {
+			line = ansi.Truncate(line, inner, "")
+		}
+		lines = append(lines, border.Render("│")+line+strings.Repeat(" ", inner-lipgloss.Width(line))+border.Render("│"))
+	}
+	lines = append(lines, border.Render("╰"+strings.Repeat("─", inner)+"╯"))
+	return strings.Join(lines, "\n")
+}
+
+// viewHeader shows only what differs from normal: platform problems, held messages,
+// the budget, receipts switched on.
 func (m Model) viewHeader() string {
 	left := logoStyle.Render("dmz")
 	ids := make([]core.PlatformID, 0, len(m.inbox.Status))
@@ -61,34 +98,47 @@ func (m Model) viewHeader() string {
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
-		left += "  " + platformNames[id] + " " + statusText(m.inbox.Status[id])
+		left += "  " + statusText(platformNames[id], m.inbox.Status[id])
 		if p := m.inbox.Sync[id]; p > 0 && p < 100 {
 			left += dimStyle.Render(fmt.Sprintf(" syncing %d%%", p))
 		}
 	}
 
-	right := "live"
+	var right []string
 	if !m.inbox.Next.IsZero() {
-		right = fmt.Sprintf("next drop %s", m.inbox.Next.Format("15:04"))
+		held := dimStyle.Render("next drop " + m.inbox.Next.Format("15:04"))
 		if m.inbox.Held > 0 {
-			right += fmt.Sprintf(" · %d held", m.inbox.Held)
+			held = lipgloss.NewStyle().Foreground(yellow).Render(fmt.Sprintf("%d held", m.inbox.Held)) + dimStyle.Render(" · next "+m.inbox.Next.Format("15:04"))
 		}
+		right = append(right, held)
 	}
-	if m.inbox.Receipts {
-		right += " · receipts on"
-	} else {
-		right += " · receipts off"
-	}
-	right = dimStyle.Render(right)
 	if m.inbox.Limit > 0 {
 		remaining := m.inbox.Limit - m.inbox.Used
 		style := dimStyle
 		if remaining <= 5*time.Minute {
 			style = lipgloss.NewStyle().Foreground(yellow)
 		}
-		right += style.Render(fmt.Sprintf(" · %s left", minutes(remaining)))
+		right = append(right, style.Render(minutes(remaining)+" left"))
 	}
-	return spread(left, right+" ", m.width)
+	if m.inbox.Receipts {
+		right = append(right, lipgloss.NewStyle().Foreground(yellow).Render("read receipts on"))
+	}
+	return spread(" "+left, strings.Join(right, dimStyle.Render("  ·  "))+" ", m.width)
+}
+
+func statusText(name string, s core.StatusEvent) string {
+	dot := func(c lipgloss.AdaptiveColor) string { return lipgloss.NewStyle().Foreground(c).Render("●") }
+	switch s.State {
+	case core.StateConnected:
+		return dot(green) + " " + dimStyle.Render(name)
+	case core.StateLoggedOut:
+		return dot(red) + " " + lipgloss.NewStyle().Foreground(red).Render(name+" logged out")
+	}
+	detail := "connecting"
+	if s.Detail != "" {
+		detail = s.Detail
+	}
+	return dot(yellow) + " " + dimStyle.Render(name+" ") + lipgloss.NewStyle().Foreground(yellow).Render(detail)
 }
 
 func minutes(d time.Duration) string {
@@ -98,314 +148,79 @@ func minutes(d time.Duration) string {
 	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
+func (m Model) viewFooter() string {
+	var hints string
+	switch m.focus {
+	case focusFilter:
+		hints = keyHints("type", "to filter", "enter", "keep", "esc", "clear")
+	case focusCompose:
+		hints = keyHints("enter", "send", "esc", "stop typing")
+	case focusChat:
+		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "esc", "inbox", "?", "help")
+	default:
+		hints = keyHints("j/k", "move", "enter", "open", "i", "reply", "/", "search", "?", "help")
+	}
+	status := errorStyle.Render(m.flash)
+	if m.flash == "" {
+		status = accentStyle.Render(m.note)
+	}
+	return spread(" "+hints, status+" ", m.width)
+}
+
 var helpSections = []struct {
 	title string
 	keys  [][2]string
 }{
-	{"Inbox", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "filter by name"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
+	{"Inbox", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "search by name"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
 	{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to inbox"}}},
 	{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
 	{"Anywhere", [][2]string{{"?", "this help"}, {"q", "quit (outside text input)"}, {"ctrl+c", "quit"}}},
 }
 
 func (m Model) viewHelp() string {
-	var b strings.Builder
-	b.WriteString(boldStyle.Render("dmz keys") + "\n")
+	var body []string
 	for _, sec := range helpSections {
-		b.WriteString("\n" + accentStyle.Render(sec.title) + "\n")
+		body = append(body, "", " "+accentStyle.Bold(true).Render(sec.title))
 		for _, k := range sec.keys {
-			b.WriteString(fmt.Sprintf("  %-10s %s\n", k[0], dimStyle.Render(k[1])))
+			body = append(body, "   "+keyStyle.Render(fmt.Sprintf("%-10s", k[0]))+" "+dimStyle.Render(k[1]))
 		}
 	}
-	b.WriteString("\n" + dimStyle.Render("any key to close · dmz stats in a shell for your week"))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, b.String())
+	body = append(body, "", " "+dimStyle.Render("any key closes · run dmz stats for your week"))
+	return m.centered(panel("Keys", "", body, 54, len(body)+3, true, -1))
 }
 
 func (m Model) viewLocked() string {
 	body := []string{
-		boldStyle.Render("Today's dmz time is used up"),
 		"",
-		fmt.Sprintf("You spent %s here today (budget %s).", minutes(m.inbox.Used), minutes(m.inbox.Limit)),
-		"Messages keep arriving and will be here tomorrow.",
+		"  " + boldStyle.Render("Today's dmz time is used up"),
 		"",
-		dimStyle.Render("q quit · e extend by 5 minutes (counted in dmz stats)"),
+		"  " + fmt.Sprintf("You spent %s here today, budget %s.", minutes(m.inbox.Used), minutes(m.inbox.Limit)),
+		"  " + "Messages keep arriving; they'll be here tomorrow.",
+		"",
+		"  " + keyHints("q", "quit", "e", "5 more minutes (counted in dmz stats)"),
 	}
 	if m.extend.Focused() {
-		body = append(body, "", m.extend.View())
+		body = append(body, "", "  "+m.extend.View())
 	}
 	if m.flash != "" {
-		body = append(body, "", errorStyle.Render(m.flash))
+		body = append(body, "", "  "+errorStyle.Render(m.flash))
 	}
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, strings.Join(body, "\n"))
+	return m.centered(panel("Time's up", "", body, 60, len(body)+3, true, -1))
 }
 
-func statusText(s core.StatusEvent) string {
-	var text string
-	var color lipgloss.AdaptiveColor
-	switch s.State {
-	case core.StateConnected:
-		text, color = "● online", green
-	case core.StateConnecting:
-		text, color = "○ connecting", yellow
-	case core.StateDisconnected:
-		text, color = "○ offline", yellow
-	case core.StateLoggedOut:
-		text, color = "✕ logged out", red
-	}
-	if s.Detail != "" && s.State != core.StateConnected {
-		text += " (" + s.Detail + ")"
-	}
-	return lipgloss.NewStyle().Foreground(color).Render(text)
+// centered places a block in the middle of the screen, exactly width×height.
+func (m Model) centered(block string) string {
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, block)
 }
 
-func (m Model) viewFooter() string {
-	var hints string
-	switch m.focus {
-	case focusFilter:
-		hints = "type to filter · enter keep · esc clear"
-	case focusCompose:
-		hints = "enter send · esc stop typing"
-	case focusChat:
-		hints = "j/k select · o open media · i reply · esc inbox · ? help"
-	default:
-		hints = "j/k move · enter open · i reply · / filter · ? help · q quit"
+// spread puts left and right on one line of width w, truncating left if needed.
+func spread(left, right string, w int) string {
+	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		left = ansi.Truncate(left, max(0, w-lipgloss.Width(right)-1), "…")
+		gap = max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
 	}
-	status := errorStyle.Render(m.flash)
-	if m.flash == "" {
-		status = accentStyle.Render(m.note)
-	}
-	return spread(" "+dimStyle.Render(hints), status+" ", m.width)
-}
-
-func (m Model) viewInbox(w, h int) string {
-	var lines []string
-	if m.filterShown() {
-		lines = append(lines, m.filter.View())
-	}
-	if len(m.visible) == 0 {
-		msg := "No chats yet.\n\nThe first sync after linking\ncan take a few minutes."
-		if m.filter.Value() != "" {
-			msg = "No matching chats."
-		}
-		lines = append(lines, "", dimStyle.Render(msg))
-	}
-	for i := m.offset; i < len(m.visible) && len(lines)+2 <= h; i++ {
-		lines = append(lines, m.inboxRow(m.visible[i], i == m.cursor, w)...)
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
-	marker := "  "
-	if selected {
-		marker = accentStyle.Render("▌ ")
-	}
-	when := shortTime(c.Last.Timestamp, time.Now())
-	nameStyle := lipgloss.NewStyle()
-	if c.Unread > 0 {
-		nameStyle = boldStyle
-	}
-	if selected && (m.focus == focusInbox || m.focus == focusFilter) {
-		nameStyle = nameStyle.Foreground(accent)
-	}
-	badge := ""
-	if m.multiPlatform() {
-		badge = platformBadges[c.Platform] + " "
-	}
-	name := badge + nameStyle.Render(ansi.Truncate(c.Title(), w-2-lipgloss.Width(badge)-len(when)-1, "…"))
-
-	unread := ""
-	if c.Unread > 0 {
-		unread = badgeStyle.Render(fmt.Sprint(c.Unread))
-	}
-	preview := ansi.Truncate(previewText(c), w-2-lipgloss.Width(unread)-1, "…")
-
-	return []string{
-		spread(marker+name, dimStyle.Render(when), w),
-		spread(marker+dimStyle.Render(preview), unread, w),
-	}
-}
-
-func (m Model) multiPlatform() bool {
-	for _, c := range m.inbox.Chats {
-		if c.Platform != m.inbox.Chats[0].Platform {
-			return true
-		}
-	}
-	return false
-}
-
-func (m Model) viewChat(w, h int) string {
-	if m.open == nil {
-		delivery := "live, messages arrive as they come"
-		if !m.inbox.Next.IsZero() {
-			delivery = fmt.Sprintf("held until %s (%d waiting); VIPs come through", m.inbox.Next.Format("15:04"), m.inbox.Held)
-		}
-		receipts := "off: nobody sees \"seen\" from dmz"
-		if m.inbox.Receipts {
-			receipts = "on"
-		}
-		help := strings.Join([]string{
-			boldStyle.Render("No chat open"),
-			"",
-			"Pick one with j/k and enter.",
-			"",
-			dimStyle.Render("Delivery:      ") + delivery,
-			dimStyle.Render("Read receipts: ") + receipts,
-			dimStyle.Render("Feeds:         ") + "status updates and channels are never shown",
-		}, "\n")
-		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, help)
-	}
-
-	title := boldStyle.Render(ansi.Truncate(m.open.Title(), w-12, "…"))
-	kind := platformNames[m.open.Platform]
-	if m.open.IsGroup {
-		kind = "group · " + kind
-	}
-	divider := lipgloss.NewStyle().Foreground(subtle).Render(strings.Repeat("─", w))
-	return strings.Join([]string{spread(title, dimStyle.Render(kind), w), m.chatView.View(), divider, m.compose.View()}, "\n")
-}
-
-// renderChat rebuilds the message log for the viewport.
-func (m *Model) renderChat() {
-	w := m.chatView.Width - 2 // two-column gutter for the selection marker
-	if w <= 0 || m.open == nil {
-		return
-	}
-	m.starts = m.starts[:0]
-	if len(m.messages) == 0 {
-		m.chatView.SetContent(dimStyle.Render("No messages yet."))
-		return
-	}
-	var lines []string
-	var lastDay string
-	now := time.Now()
-	for i, msg := range m.messages {
-		if day := dayLabel(msg.Timestamp, now); day != lastDay {
-			lastDay = day
-			lines = append(lines, "  "+lipgloss.PlaceHorizontal(w, lipgloss.Center, dimStyle.Render("── "+day+" ──")))
-		}
-		m.starts = append(m.starts, len(lines))
-		gutter := "  "
-		if i == m.sel && m.focus == focusChat {
-			gutter = accentStyle.Render("▌ ")
-		}
-		for _, l := range messageLines(msg, w) {
-			lines = append(lines, gutter+l)
-		}
-	}
-	// Short chats sit at the bottom, next to the composer, like any chat app.
-	if pad := m.chatView.Height - len(lines); pad > 0 {
-		lines = append(make([]string, pad), lines...)
-		for i := range m.starts {
-			m.starts[i] += pad
-		}
-	}
-	m.chatView.SetContent(strings.Join(lines, "\n"))
-}
-
-// messageLines renders one message to width w: time, sender, text with a hanging indent, reactions.
-func messageLines(msg core.Message, w int) []string {
-	sender := senderStyle(msg.SenderID)
-	if msg.FromMe {
-		sender = boldStyle.Foreground(accent)
-	}
-	head := dimStyle.Render(msg.Timestamp.Format("15:04")) + " " + sender.Render(msg.Sender()) + " "
-	text := msg.Body
-	if tag := mediaTag(msg); tag != "" {
-		text = strings.TrimSpace(tagStyle.Render(tag) + " " + text)
-	}
-	if msg.Edited && !msg.Deleted {
-		text += dimStyle.Render(" (edited)")
-	}
-
-	var out []string
-	indent := lipgloss.Width(head)
-	if indent > w/2 {
-		out = append(out, head)
-		indent = 2
-		head = "  "
-	}
-	pad := strings.Repeat(" ", indent)
-	for i, line := range strings.Split(lipgloss.NewStyle().Width(w-indent).Render(text), "\n") {
-		if i == 0 {
-			out = append(out, head+line)
-		} else {
-			out = append(out, pad+line)
-		}
-	}
-	if len(msg.Reactions) > 0 {
-		parts := make([]string, len(msg.Reactions))
-		for i, r := range msg.Reactions {
-			parts[i] = r.Emoji
-			if r.Count > 1 {
-				parts[i] += fmt.Sprint(r.Count)
-			}
-		}
-		out = append(out, pad+ansi.Truncate(dimStyle.Render(strings.Join(parts, "  ")), w-indent, "…"))
-	}
-	return out
-}
-
-// mediaTag is the placeholder shown instead of media. Nothing autoplays or renders inline.
-func mediaTag(msg core.Message) string {
-	with := func(tag, detail string) string {
-		if detail == "" {
-			return "[" + tag + "]"
-		}
-		return "[" + tag + " " + detail + "]"
-	}
-	if msg.Deleted {
-		return "[deleted]"
-	}
-	switch msg.Kind {
-	case core.KindImage:
-		return "[photo]"
-	case core.KindVideo:
-		return with("video", msg.Meta)
-	case core.KindGIF:
-		return "[gif]"
-	case core.KindVoice:
-		return with("voice", msg.Meta)
-	case core.KindAudio:
-		return with("audio", msg.Meta)
-	case core.KindDocument:
-		return with("file", msg.Meta)
-	case core.KindSticker:
-		return "[sticker]"
-	case core.KindLocation:
-		return with("location", msg.Meta)
-	case core.KindContact:
-		return with("contact", msg.Meta)
-	case core.KindPoll:
-		return "[poll]"
-	case core.KindLink:
-		if isShortVideo(msg.Meta) {
-			return "[reel]"
-		}
-	}
-	return ""
-}
-
-// isShortVideo spots reels/shorts links: shown as text, never previewed.
-func isShortVideo(url string) bool {
-	for _, s := range []string{"instagram.com/reel", "instagram.com/p/", "tiktok.com", "youtube.com/shorts", "facebook.com/reel", "fb.watch"} {
-		if strings.Contains(url, s) {
-			return true
-		}
-	}
-	return false
-}
-
-func previewText(c core.ChatSummary) string {
-	text := strings.Join(strings.Fields(strings.TrimSpace(mediaTag(c.Last)+" "+c.Last.Body)), " ")
-	switch {
-	case c.Last.FromMe:
-		return "You: " + text
-	case c.IsGroup:
-		return c.Last.Sender() + ": " + text
-	}
-	return text
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func shortTime(t, now time.Time) string {
@@ -434,14 +249,4 @@ func sameDay(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
-}
-
-// spread puts left and right on one line of width w, truncating left if needed.
-func spread(left, right string, w int) string {
-	gap := w - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 1 {
-		left = ansi.Truncate(left, max(0, w-lipgloss.Width(right)-1), "…")
-		gap = max(1, w-lipgloss.Width(left)-lipgloss.Width(right))
-	}
-	return left + strings.Repeat(" ", gap) + right
 }

@@ -185,14 +185,19 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 	return in, nil
 }
 
-// Open loads the newest limit visible messages of a chat and marks it read locally.
+// Open loads the newest limit visible messages of a chat and marks it read locally. It also
+// returns the read marker from before, so the UI can show where the new messages start.
 // Read receipts are only sent to the platform when enabled in config.
-func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int) ([]core.Message, error) {
+func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int) ([]core.Message, time.Time, error) {
 	cut := a.cutoff(now)
+	lastRead, err := a.store.LastRead(chat.Platform, chat.ID)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
 	if p, linked := a.platforms[chat.Platform]; a.readReceipts && linked {
 		unread, err := a.store.Unread(chat.Platform, chat.ID, cut)
 		if err != nil {
-			return nil, err
+			return nil, time.Time{}, err
 		}
 		if len(unread) > 0 {
 			if err := p.MarkRead(ctx, chat, unread); err != nil {
@@ -202,14 +207,14 @@ func (a *App) Open(ctx context.Context, chat core.Chat, now time.Time, limit int
 	}
 	msgs, err := a.store.Messages(chat.Platform, chat.ID, cut, limit)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	if len(msgs) > 0 {
 		if err := a.store.MarkRead(chat.Platform, chat.ID, msgs[len(msgs)-1].Timestamp); err != nil {
-			return nil, err
+			return nil, time.Time{}, err
 		}
 	}
-	return msgs, nil
+	return msgs, lastRead, nil
 }
 
 func (a *App) Send(ctx context.Context, chat core.Chat, text string) error {
