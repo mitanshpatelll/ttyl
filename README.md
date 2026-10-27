@@ -48,7 +48,8 @@ never the point.
 
 - Discord-style chat: who said what is obvious (colored names, avatars, "Today at 17:15")
 - a details panel next to the chat (`space` `e`): who it is, shared media, links, files, and who talks in a group
-- unread line, jump to first unread, search chats with `/`
+- unread line, jump to first unread
+- `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
 - loader with real counts when you come back to a big backlog
 - Nerd Font icons (JetBrainsMono Nerd Font etc.), with a plain-text fallback
 - edits, unsends and reactions show up; media downloads only when you press `o`
@@ -95,7 +96,7 @@ close the window *without* logging out.
 | `enter` | open a chat · send |
 | `i` | reply |
 | `o` | open the selected photo / voice note / file |
-| `/` | search every chat · `w:` `i:` `t:` for one app, e.g. `w: mom` |
+| `/` | search every chat (from the list or a chat) · `w:` `i:` `t:` for one app, e.g. `w: mom` · `↑` `↓` choose |
 | `a` | all chats ↔ unread only |
 | `space` `e` | details panel on / off (remembered) |
 | `g` / `G` | top / bottom (going past the top loads older messages) |

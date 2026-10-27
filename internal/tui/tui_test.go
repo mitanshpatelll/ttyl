@@ -80,6 +80,10 @@ func key(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEnter}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
 	}
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 }
@@ -146,11 +150,15 @@ func TestLayoutAndFlow(t *testing.T) {
 	for _, r := range "week" {
 		m = step(t, m, key(string(r)))
 	}
-	if len(m.visible) != 1 || !m.visible[0].IsGroup {
-		t.Errorf("filter visible = %+v", m.visible)
+	if len(m.found) != 1 || !m.found[0].IsGroup || !strings.Contains(m.View(), "1 MATCH") {
+		t.Errorf("search found %+v:\n%s", m.found, m.View())
 	}
-	checkFits(t, m, "filter")
+	checkFits(t, m, "search")
 	t.Logf("\n%s", m.View())
+	m = step(t, m, key("enter"))
+	if m.focus != focusChat || m.open == nil || !m.open.IsGroup || strings.Contains(m.View(), "esc to close") {
+		t.Errorf("enter in search: focus %d, open %+v", m.focus, m.open)
+	}
 }
 
 func checkFits(t *testing.T, m Model, label string) {
@@ -260,8 +268,8 @@ func TestBudgetLockAndExtend(t *testing.T) {
 	}
 	checkFits(t, m, "lock screen")
 	m = step(t, m, key("/")) // normal keys do nothing while locked
-	if m.focus == focusFilter {
-		t.Error("filter opened while locked")
+	if m.focus == focusSearch {
+		t.Error("search opened while locked")
 	}
 
 	m = step(t, m, key("e"))
@@ -353,8 +361,8 @@ func TestHelpOverlay(t *testing.T) {
 	}
 	m = step(t, m, key("/"))
 	m = step(t, m, key("?"))
-	if m.help || m.filter.Value() != "?" {
-		t.Error("? while typing a filter must type, not open help")
+	if m.help || m.search.Value() != "?" {
+		t.Error("? while typing a search must type, not open help")
 	}
 }
 
@@ -535,17 +543,53 @@ func TestUnreadOnlyAndSearch(t *testing.T) {
 	}
 	m = step(t, m, key("esc"))
 
+	// The search modal looks through every chat, read or not.
+	found := func() string {
+		var out []string
+		for _, c := range m.found {
+			out = append(out, c.Name)
+		}
+		return strings.Join(out, ",")
+	}
 	for query, want := range map[string]string{"w:": "Mom,Raj", "W: ra": "Raj", "ra": "Raj", "tg:dev": "Dev chat", "i:": ""} {
 		m = step(t, m, key("/"))
 		for _, r := range query {
 			m = step(t, m, key(string(r)))
 		}
-		if got := names(); got != want {
+		if got := found(); got != want {
 			t.Errorf("search %q = %q, want %q", query, got, want)
+		}
+		if names() != "Dev chat" {
+			t.Errorf("search %q changed the sidebar: %q", query, names())
 		}
 		checkFits(t, m, "search "+query)
 		m = step(t, m, key("esc"))
+		if m.focus != focusInbox || m.search.Value() != "" {
+			t.Errorf("esc did not close the search")
+		}
 	}
+	if m = step(t, m, key("/")); !strings.Contains(m.View(), "RECENT") || len(m.found) != 3 {
+		t.Errorf("empty search should list recent chats: %q", found())
+	}
+	m = step(t, m, key("w"))
+	m = step(t, m, key(":"))
+	m = step(t, m, key("down"))
+	if !strings.Contains(m.View(), "WhatsApp only") || m.found[m.foundSel].Name != "Raj" {
+		t.Errorf("down should choose Raj: %q at %d\n%s", found(), m.foundSel, m.View())
+	}
+	m = step(t, m, key("enter")) // a read chat opens and stays in the sidebar
+	if m.open == nil || m.open.Name != "Raj" || m.focus != focusChat || !strings.Contains(names(), "Raj") {
+		t.Errorf("open from search: %+v, sidebar %q", m.open, names())
+	}
+	m = step(t, m, key("/")) // from the chat too
+	if m.focus != focusSearch {
+		t.Error("/ in a chat did not open search")
+	}
+	m = step(t, m, key("esc"))
+	if m.focus != focusChat {
+		t.Errorf("esc went to %d, not back to the chat", m.focus)
+	}
+	m = step(t, m, key("esc"))
 
 	m = step(t, m, key("a"))
 	if names() != "Mom,Raj,Dev chat" || !strings.Contains(m.View(), "ALL CHATS") {
@@ -622,4 +666,31 @@ func TestDetailsPanel(t *testing.T) {
 		t.Errorf("panel shown at 90 columns (%d)", m.detailsW())
 	}
 	checkFits(t, m, "narrow")
+}
+
+func TestSearchRanking(t *testing.T) {
+	var chats []core.ChatSummary
+	for _, name := range []string{"Brad", "Kara Ra", "Raj", "Ravi Kumar", "Mom"} {
+		chats = append(chats, core.ChatSummary{Chat: core.Chat{Platform: core.WhatsApp, ID: name, Name: name}})
+	}
+	chats = append(chats, core.ChatSummary{Chat: core.Chat{Platform: core.Telegram, ID: "tg", Name: "Rani"}})
+	for query, want := range map[string]string{
+		"ra":      "Raj,Ravi Kumar,Rani,Kara Ra,Brad", // starts with, then a word starts with, then anywhere
+		"ku ra":   "Ravi Kumar",
+		"t: ra":   "Rani",
+		"":        "Brad,Kara Ra,Raj,Ravi Kumar,Mom,Rani",
+		"zzz":     "",
+		"w:":      "Brad,Kara Ra,Raj,Ravi Kumar,Mom",
+		"RAVI":    "Ravi Kumar",
+		"mom ":    "Mom",
+		"ra kara": "Kara Ra",
+	} {
+		var got []string
+		for _, c := range searchResults(chats, query) {
+			got = append(got, c.Name)
+		}
+		if strings.Join(got, ",") != want {
+			t.Errorf("search %q = %q, want %q", query, strings.Join(got, ","), want)
+		}
+	}
 }

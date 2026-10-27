@@ -24,8 +24,8 @@ type RefreshMsg struct{}
 type focus int
 
 const (
-	focusInbox focus = iota
-	focusFilter
+	focusInbox  focus = iota
+	focusSearch       // the search modal
 	focusChat
 	focusCompose
 )
@@ -83,7 +83,11 @@ type Model struct {
 	bubbleWidth int
 	chatContent []string // every line of the open chat; the viewport tracks the scroll position
 
-	filter  textinput.Model
+	search   textinput.Model    // the search modal's query
+	found    []core.ChatSummary // its results
+	foundSel int
+	back     focus // where esc in the search modal goes back to
+
 	compose textinput.Model
 	extend  textinput.Model // on the lock screen: type "extend" for more time
 
@@ -105,9 +109,11 @@ type Model struct {
 }
 
 func New(a *app.App) Model {
-	filter := textinput.New()
-	filter.Prompt = ""
-	filter.Placeholder = "name, or w: i: t: + name"
+	search := textinput.New()
+	search.Prompt = ""
+	search.Placeholder = "Who do you want to talk to?"
+	search.TextStyle = lipgloss.NewStyle().Foreground(text)
+	search.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint)
 	compose := textinput.New()
 	compose.Prompt = ""
 	compose.Placeholder = "Write a message…"
@@ -115,13 +121,10 @@ func New(a *app.App) Model {
 	compose.TextStyle = lipgloss.NewStyle().Foreground(text).Background(inputBg)
 	compose.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint).Background(inputBg)
 	compose.Cursor.TextStyle = lipgloss.NewStyle().Background(inputBg)
-	filter.TextStyle = lipgloss.NewStyle().Foreground(text).Background(sidebarBg)
-	filter.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint).Background(sidebarBg)
-	filter.Cursor.TextStyle = lipgloss.NewStyle().Background(sidebarBg)
 	extend := textinput.New()
 	extend.Prompt = "> "
 	extend.Placeholder = `type "extend" for 5 more minutes`
-	return Model{app: a, filter: filter, compose: compose, extend: extend, chatView: viewport.New(0, 0),
+	return Model{app: a, search: search, compose: compose, extend: extend, chatView: viewport.New(0, 0),
 		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now(),
 		showDetails: a.Pref(detailsPref) != "off"}
 }
@@ -259,9 +262,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasLocked := m.inbox.Locked()
 		m.inbox = msg.inbox
 		m.applyFilter()
+		if m.focus == focusSearch {
+			m.findChats(true)
+		}
 		if m.inbox.Locked() && !wasLocked {
 			m.compose.Blur()
-			m.filter.Blur()
+			if m.focus == focusSearch {
+				m.closeSearch()
+			}
 		}
 		if m.open != nil {
 			for _, c := range m.inbox.Chats {
@@ -341,8 +349,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case focusCompose:
 		m.compose, cmd = m.compose.Update(msg)
-	case focusFilter:
-		m.filter, cmd = m.filter.Update(msg)
+	case focusSearch:
+		m.search, cmd = m.search.Update(msg)
 	}
 	if m.extend.Focused() {
 		m.extend, cmd = m.extend.Update(msg)
@@ -396,7 +404,7 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.inbox.Locked() {
 		return m.handleLockedKey(k)
 	}
-	typing := m.focus == focusCompose || m.focus == focusFilter
+	typing := m.focus == focusCompose || m.focus == focusSearch
 	if m.help || (k.String() == "?" && !typing) {
 		m.help = !m.help && k.String() == "?" // any key closes it
 		return m, nil
@@ -420,21 +428,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.focus {
-	case focusFilter:
-		switch k.String() {
-		case "esc":
-			m.filter.Reset()
-			m.filter.Blur()
-			m.focus = focusInbox
-			m.applyFilter()
-		case "enter":
-			m.filter.Blur()
-			m.focus = focusInbox
-		default:
-			m.filter, cmd = m.filter.Update(k)
-			m.selected = "" // jump to the first match
-			m.applyFilter()
-		}
+	case focusSearch:
+		return m.handleSearchKey(k)
 
 	case focusCompose:
 		switch k.String() {
@@ -456,6 +451,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch k.String() {
 		case "q":
 			return m, tea.Quit
+		case "/":
+			cmd = m.openSearch()
 		case "esc", "h", "left", "tab":
 			m.setFocus(focusInbox)
 		case "i", "enter":
@@ -504,20 +501,13 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "G", "end":
 			m.move(len(m.visible))
 		case "/":
-			m.focus = focusFilter
-			m.layout()
-			cmd = m.filter.Focus()
+			cmd = m.openSearch()
 		case "a":
 			m.showAll = !m.showAll
 			m.applyFilter()
 			m.note = "showing unread chats only"
 			if m.showAll {
 				m.note = "showing all chats"
-			}
-		case "esc":
-			if m.filter.Value() != "" {
-				m.filter.Reset()
-				m.applyFilter()
 			}
 		case "enter", "l", "right":
 			cmd = m.openSelected(focusChat)
@@ -596,22 +586,16 @@ func (m *Model) move(delta int) {
 }
 
 // applyFilter picks the chats the sidebar lists: unread ones (plus the open and the selected
-// chat, so reading one doesn't pull it away), every chat with showAll, or search matches.
-// They are grouped by platform.
+// chat, so reading one doesn't pull it away), or every chat with showAll. They are grouped by
+// platform. Search has its own list, in the modal.
 func (m *Model) applyFilter() {
-	platform, q := searchQuery(m.filter.Value())
 	keep := map[string]bool{m.selected: true}
 	if m.open != nil {
 		keep[chatKey(*m.open)] = true
 	}
 	m.visible = nil
 	for _, c := range m.inbox.Chats {
-		switch {
-		case m.searching():
-			if (platform != "" && c.Platform != platform) || !strings.Contains(strings.ToLower(c.Title()), q) {
-				continue
-			}
-		case !m.showAll && c.Unread == 0 && !keep[chatKey(c.Chat)]:
+		if !m.showAll && c.Unread == 0 && !keep[chatKey(c.Chat)] {
 			continue
 		}
 		m.visible = append(m.visible, c)
@@ -674,7 +658,7 @@ func (m *Model) layout() {
 	m.chatView.Width = w
 	m.chatView.Height = max(1, m.bodyH()-composerH)
 	m.compose.Width = max(1, w-9)
-	m.filter.Width = max(1, m.leftW()-12)
+	m.search.Width = max(1, m.searchW()-26) // room for the icon and the "WhatsApp only" chip
 	m.renderChat()
 	m.showSelected()
 	m.scrollInbox()

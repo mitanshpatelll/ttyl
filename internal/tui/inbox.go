@@ -52,8 +52,6 @@ func searchQuery(v string) (core.PlatformID, string) {
 	return "", strings.ToLower(q)
 }
 
-func (m Model) searching() bool { return strings.TrimSpace(m.filter.Value()) != "" }
-
 func platformTag(p core.PlatformID) string {
 	return lipgloss.NewStyle().Foreground(platformColors[p]).Render(platformIcons[p].sp() + platformTags[p])
 }
@@ -63,27 +61,23 @@ func avatar(id, name string) string {
 	return lipgloss.NewStyle().Bold(true).Foreground(white).Background(personColor(id)).Render(" " + cw.Pad(initialsOf(name), 2) + " ")
 }
 
-// inboxHeader is the sidebar heading under the top bar, or the search box while searching.
+// inboxHeader is the sidebar heading under the top bar: which chats it lists, and where the
+// cursor is.
 func (m Model) inboxHeader(w int) string {
 	bg := on(sidebarBg)
 	pos := ""
 	if len(m.visible) > 0 {
 		pos = bg(dimStyle).Render(fmt.Sprintf("%d/%d ", m.cursor+1, len(m.visible)))
 	}
-	var left string
-	if m.filterShown() {
-		left = bg(lipgloss.NewStyle()).Render(" ") + bg(accentStyle).Render(iconSearch.sp()) + m.filter.View()
-	} else {
-		style := bg(dimStyle.Bold(true))
-		if m.focus == focusInbox {
-			style = style.Foreground(accent)
-		}
-		label := "UNREAD"
-		if m.showAll {
-			label = "ALL CHATS"
-		}
-		left = bg(lipgloss.NewStyle()).Render(" ") + style.Render(label)
+	style := bg(dimStyle.Bold(true))
+	if m.focus == focusInbox {
+		style = style.Foreground(accent)
 	}
+	label := "UNREAD"
+	if m.showAll {
+		label = "ALL CHATS"
+	}
+	left := bg(lipgloss.NewStyle()).Render(" ") + style.Render(label)
 	gap := max(1, w-cw.String(left)-cw.String(pos))
 	return fill(left+bg(lipgloss.NewStyle()).Render(strings.Repeat(" ", gap))+pos, w, sidebarBg)
 }
@@ -113,16 +107,14 @@ func (it sideItem) height() int {
 }
 
 // sections are the platforms with a heading: every linked one (so "all caught up" shows),
-// or while searching only those with matches.
+// and any other with chats to list.
 func (m Model) sections() []core.PlatformID {
 	has := map[core.PlatformID]bool{}
 	for _, c := range m.visible {
 		has[c.Platform] = true
 	}
-	if !m.searching() {
-		for p := range m.inbox.Status {
-			has[p] = true
-		}
+	for p := range m.inbox.Status {
+		has[p] = true
 	}
 	var out []core.PlatformID
 	for _, p := range platformOrder {
@@ -156,14 +148,12 @@ func (m Model) inboxLines(w, h int) []string {
 	bg := on(sidebarBg)
 	var lines []string
 	switch {
-	case len(m.inbox.Chats) == 0 && !m.searching():
+	case len(m.inbox.Chats) == 0:
 		msg := []string{bg(boldStyle).Render("Waiting for your chats"), "", bg(dimStyle).Render("The first sync after linking"), bg(dimStyle).Render("can take a few minutes.")}
 		if m.syncing() {
 			msg = []string{m.spinFrame(sidebarBg) + bg(boldStyle).Render(" Syncing your chats"), "", bg(dimStyle).Render("Hang tight, this can take"), bg(dimStyle).Render("a few minutes.")}
 		}
 		lines = centerLines(msg, w, h, sidebarBg)
-	case len(m.visible) == 0 && m.searching():
-		lines = centerLines([]string{bg(dimStyle).Render("No chat matches “" + strings.TrimSpace(m.filter.Value()) + "”")}, w, h, sidebarBg)
 	default:
 		y := 0
 		for _, it := range m.sideItems() {
@@ -259,8 +249,7 @@ func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
 		nameStyle = nameStyle.Foreground(text).Bold(true)
 	}
 	nameRoom := w - 7 - cw.String(when) - 3
-	_, query := searchQuery(m.filter.Value())
-	name := highlightMatch(cw.Truncate(c.Title(), max(1, nameRoom), "…"), query, nameStyle)
+	name := nameStyle.Render(cw.Truncate(c.Title(), max(1, nameRoom), "…"))
 
 	pill := ""
 	if c.Unread > 0 {
@@ -281,17 +270,6 @@ func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
 		line(edge+plain.Render(" ")+avatar(chatKey(c.Chat), c.Title())+plain.Render(" ")+name, when),
 		line(edge+plain.Render("      ")+preview, pill),
 	}
-}
-
-// highlightMatch underlines the first case-insensitive match of query in s.
-func highlightMatch(s, query string, base lipgloss.Style) string {
-	q := strings.ToLower(strings.TrimSpace(query))
-	lower := strings.ToLower(s)
-	i := strings.Index(lower, q)
-	if q == "" || i < 0 || len(lower) != len(s) { // byte offsets only line up when lowering keeps lengths
-		return base.Render(s)
-	}
-	return base.Render(s[:i]) + base.Underline(true).Foreground(accent).Render(s[i:i+len(q)]) + base.Render(s[i+len(q):])
 }
 
 func previewText(c core.ChatSummary) string {

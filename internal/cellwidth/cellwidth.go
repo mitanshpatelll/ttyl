@@ -222,6 +222,44 @@ func Truncate(s string, n int, tail string) string {
 	return b.String()
 }
 
+// Skip drops the first n cells of s, for drawing over the start of a line. The escape
+// sequences of the dropped part are kept so the rest keeps its style, and a wide cluster cut
+// in half leaves spaces for the cells that remain of it.
+func Skip(s string, n int) string {
+	var b strings.Builder
+	used := 0
+	forEach(s, func(seq string, isEscape bool) bool {
+		if isEscape || used >= n {
+			b.WriteString(seq)
+			return true
+		}
+		eachCluster(seq, func(c string, w int) bool {
+			switch {
+			case used >= n:
+				b.WriteString(c)
+			case used+w > n:
+				b.WriteString(strings.Repeat(" ", used+w-n))
+			}
+			used += w
+			return true
+		})
+		return true
+	})
+	return b.String()
+}
+
+// Strip removes the escape sequences, leaving the plain text.
+func Strip(s string) string {
+	var b strings.Builder
+	forEach(s, func(seq string, isEscape bool) bool {
+		if !isEscape {
+			b.WriteString(seq)
+		}
+		return true
+	})
+	return b.String()
+}
+
 // Pad fills s with spaces on the right up to n cells (truncating if it is longer).
 func Pad(s string, n int) string {
 	w := String(s)

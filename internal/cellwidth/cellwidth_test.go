@@ -55,6 +55,15 @@ func TestEscapesTruncatePadWrap(t *testing.T) {
 	if c := Center("ab", 6); c != "  ab  " {
 		t.Errorf("Center = %q", c)
 	}
+	if s := Skip("\x1b[31mab\x1b[0mcd", 3); s != "\x1b[31m\x1b[0md" {
+		t.Errorf("Skip kept %q", s)
+	}
+	if s := Strip("\x1b[1mજય\x1b[0m વિર\x1b]8;;x\x07"); s != "જય વિર" {
+		t.Errorf("Strip = %q", s)
+	}
+	if s := Skip("a👋b", 2); s != " b" { // the emoji's second cell becomes a space
+		t.Errorf("Skip through a wide cluster = %q", s)
+	}
 	lines := Wrap("Chlo bhut kha liya ab thoda rest kr leti hu 👋", 12)
 	for _, l := range lines {
 		if String(l) > 12 {

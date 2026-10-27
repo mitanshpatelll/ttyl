@@ -23,8 +23,6 @@ func (m Model) leftW() int  { return min(max(m.width*34/100, 34), 48) }
 func (m Model) rightW() int { return max(20, m.width-m.leftW()) }
 func (m Model) bodyH() int  { return max(3, m.height-3) } // minus top bar, headings, key hints
 
-func (m Model) filterShown() bool { return m.focus == focusFilter || m.filter.Value() != "" }
-
 // rows is how many inbox entries fit: a top gap, then two lines and a spacer per chat.
 func (m Model) rows() int { return max(1, m.bodyH()/3) }
 
@@ -64,6 +62,10 @@ func (m Model) View() string {
 	out = append(out, m.inboxHeader(lw)+dimStyle.Render(strings.Repeat("─", chatW))+panelHead)
 	for i := range bh {
 		out = append(out, left[i]+cw.Pad(right[i], chatW)+panel[i])
+	}
+	if m.focus == focusSearch {
+		box := m.searchBox()
+		out = overlay(m.backdrop(out), box, (m.width-m.searchW())/2, max(0, (m.height-len(box))/2))
 	}
 	out = append(out, cw.Pad(m.footer(m.width), m.width))
 	return strings.Join(out, "\n")
@@ -148,12 +150,12 @@ func (m Model) footer(w int) string {
 	switch {
 	case m.leader:
 		hints = keyHints("space", "then", "e", "details panel", "esc", "cancel")
-	case m.focus == focusFilter:
-		hints = keyHints("type", "a name", "w: i: t:", "one app", "enter", "keep", "esc", "clear")
+	case m.focus == focusSearch:
+		hints = keyHints("type", "a name", "↑/↓", "choose", "enter", "open", "esc", "close")
 	case m.focus == focusCompose:
 		hints = keyHints("enter", "send", "esc", "stop typing")
 	case m.focus == focusChat:
-		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "space e", "details", "esc", "back", "?", "help")
+		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "/", "search", "space e", "details", "esc", "back", "?", "help")
 	default:
 		hints = keyHints("j/k", "move", "enter", "open", "/", "search", "a", "all chats", "space e", "details", "?", "help", "q", "quit")
 	}
@@ -172,12 +174,12 @@ type helpSection struct {
 // helpColumns are shown side by side so the whole list fits a 24-line terminal.
 var helpColumns = [2][]helpSection{
 	{
-		{"Chat list", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "search all chats"}, {"w: i: t:", "search one app only"}, {"a", "all chats / unread"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
+		{"Chat list", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"a", "all chats / unread"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
 		{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
 	},
 	{
 		{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to the list"}}},
-		{"Anywhere", [][2]string{{"space e", "details on / off"}, {"?", "this help"}, {"q", "quit (not while typing)"}, {"ctrl+c", "quit"}}},
+		{"Anywhere", [][2]string{{"/", "search every chat"}, {"w: i: t:", "…in one app only"}, {"space e", "details on / off"}, {"?", "this help"}, {"q", "quit (not while typing)"}, {"ctrl+c", "quit"}}},
 	},
 }
 

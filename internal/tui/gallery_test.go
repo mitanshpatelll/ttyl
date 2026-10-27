@@ -110,10 +110,11 @@ func gallery(t *testing.T, width, height int) {
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("/"))
+		shot("search, just opened")
 		for _, r := range "we" {
 			m = step(t, m, key(string(r)))
 		}
-		shot("search")
+		shot("search, typing")
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("?"))
 		shot("help")
