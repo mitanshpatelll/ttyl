@@ -22,6 +22,7 @@ type Model struct {
 	JoinEmoji   bool // emoji joined by ZWJ draw as one glyph, e.g. 👨‍👩‍👧
 	VS16Wide    bool // U+FE0F makes a narrow symbol wide, e.g. ☺️
 	ToneJoins   bool // skin tone modifiers merge into the emoji, e.g. 👍🏽
+	IconWide    bool // private-use characters (Nerd Font icons) take two cells
 }
 
 // Default matches the Unicode rules modern terminals (Ghostty, WezTerm, kitty) follow.
@@ -81,6 +82,12 @@ func isVirama(r rune) bool { return r >= 0x0900 && r <= 0x0DFF && r&0x7f == 0x4d
 func (m Model) cluster(c string) int {
 	runes := []rune(c)
 	w := runeWidth(runes[0])
+	if isPrivateUse(runes[0]) {
+		w = 1
+		if m.IconWide {
+			w = 2
+		}
+	}
 	joined := false
 	for _, r := range runes[1:] {
 		switch {
@@ -110,6 +117,11 @@ func (m Model) cluster(c string) int {
 		}
 	}
 	return w
+}
+
+// isPrivateUse spots icon fonts' code points, which Unicode leaves to the font.
+func isPrivateUse(r rune) bool {
+	return (r >= 0xE000 && r <= 0xF8FF) || (r >= 0xF0000 && r <= 0xFFFFD) || (r >= 0x100000 && r <= 0x10FFFD)
 }
 
 func runeWidth(r rune) int {

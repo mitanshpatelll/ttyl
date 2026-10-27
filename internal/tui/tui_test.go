@@ -116,7 +116,7 @@ func TestLayoutAndFlow(t *testing.T) {
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = step(t, m, RefreshMsg{})
 	checkFits(t, m, "inbox")
-	if !strings.Contains(m.View(), "+15550002") || !strings.Contains(m.View(), "[voice 0:12]") {
+	if !strings.Contains(m.View(), "+15550002") || !strings.Contains(m.View(), "voice 0:12") {
 		t.Errorf("inbox missing fallback name or voice tag:\n%s", m.View())
 	}
 
@@ -209,7 +209,7 @@ func TestChatSelectionMediaAndPaging(t *testing.T) {
 		t.Fatalf("loaded %d, sel %d", len(m.messages), m.sel)
 	}
 	view := m.View()
-	for _, want := range []string{"[photo]", "[message deleted]", "(edited)", "👍", "▌"} {
+	for _, want := range []string{"photo", "message deleted", "(edited)", "👍", "▌"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("chat view missing %q:\n%s", want, view)
 		}
@@ -297,7 +297,7 @@ func TestActiveTimeIgnoresBlurAndSleep(t *testing.T) {
 	}
 }
 
-func TestPlatformBadgesOnlyWhenMixed(t *testing.T) {
+func TestSectionsPerPlatform(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
@@ -313,16 +313,24 @@ func TestPlatformBadgesOnlyWhenMixed(t *testing.T) {
 	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 16})
 
 	add(core.WhatsApp, "Mom")
-	m = step(t, m, RefreshMsg{})
-	if strings.Contains(m.viewInbox(30, 10), "WA ") {
-		t.Error("badge shown with a single platform")
-	}
 	add(core.Telegram, "Dev chat")
+	add(core.Instagram, "Sam")
 	m = step(t, m, RefreshMsg{})
-	if inbox := m.viewInbox(30, 10); !strings.Contains(inbox, "WA ") || !strings.Contains(inbox, "TG ") {
-		t.Errorf("badges missing:\n%s", inbox)
+	inbox := m.viewInbox(30, 16)
+	wa, ig, tg := strings.Index(inbox, "WhatsApp"), strings.Index(inbox, "Instagram"), strings.Index(inbox, "Telegram")
+	if wa < 0 || ig < wa || tg < ig {
+		t.Errorf("sections should be WhatsApp, Instagram, Telegram:\n%s", inbox)
 	}
-	checkFits(t, m, "mixed inbox")
+	// The cursor walks the chats in the order they are shown.
+	var order []string
+	for range 3 {
+		order = append(order, m.visible[m.cursor].Name)
+		m = step(t, m, key("j"))
+	}
+	if strings.Join(order, ",") != "Mom,Sam,Dev chat" {
+		t.Errorf("cursor order = %v", order)
+	}
+	checkFits(t, m, "sections")
 }
 
 func TestHelpOverlay(t *testing.T) {
@@ -472,7 +480,7 @@ func TestCatchUpLoader(t *testing.T) {
 	a.Drain()
 	m = step(t, m, RefreshMsg{})
 	m = step(t, m, m.spin.Tick())
-	if m.spinning || strings.Contains(m.View(), "Catching up") || !strings.Contains(m.View(), "without the feed") {
+	if m.spinning || strings.Contains(m.View(), "Catching up") || !strings.Contains(m.View(), "search anyone") {
 		t.Errorf("loader still up after sync finished (spinning=%v):\n%s", m.spinning, m.View())
 	}
 }
@@ -483,4 +491,135 @@ func TestCommas(t *testing.T) {
 			t.Errorf("commas(%d) = %q, want %q", n, got, want)
 		}
 	}
+}
+
+func TestUnreadOnlyAndSearch(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	add := func(p core.PlatformID, id, name string, read bool) {
+		b := core.BatchEvent{Platform: p, Chats: []core.Chat{{Platform: p, ID: id, Name: name}},
+			Messages: []core.Message{{Platform: p, ChatID: id, ID: "1", SenderID: id, Timestamp: now.Add(-time.Minute), Kind: core.KindText, Body: "hi"}}}
+		if read {
+			b.ReadUpTo = map[string]time.Time{id: now}
+		}
+		if err := st.Apply(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(core.WhatsApp, "mom", "Mom", true)
+	add(core.WhatsApp, "raj", "Raj", true)
+	add(core.Telegram, "dev", "Dev chat", false)
+	r, _ := rules.New(nil)
+	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = step(t, m, RefreshMsg{})
+	names := func() string {
+		var out []string
+		for _, c := range m.visible {
+			out = append(out, c.Name)
+		}
+		return strings.Join(out, ",")
+	}
+	if names() != "Dev chat" || !strings.Contains(m.View(), "All caught up") || !strings.Contains(m.View(), "UNREAD") {
+		t.Errorf("unread only: %q\n%s", names(), m.View())
+	}
+
+	m = step(t, m, key("enter")) // reading it keeps it in the list while it is open
+	m = step(t, m, RefreshMsg{})
+	if names() != "Dev chat" || m.visible[0].Unread != 0 {
+		t.Errorf("open chat left the list: %q", names())
+	}
+	m = step(t, m, key("esc"))
+
+	for query, want := range map[string]string{"w:": "Mom,Raj", "W: ra": "Raj", "ra": "Raj", "tg:dev": "Dev chat", "i:": ""} {
+		m = step(t, m, key("/"))
+		for _, r := range query {
+			m = step(t, m, key(string(r)))
+		}
+		if got := names(); got != want {
+			t.Errorf("search %q = %q, want %q", query, got, want)
+		}
+		checkFits(t, m, "search "+query)
+		m = step(t, m, key("esc"))
+	}
+
+	m = step(t, m, key("a"))
+	if names() != "Mom,Raj,Dev chat" || !strings.Contains(m.View(), "ALL CHATS") {
+		t.Errorf("all chats: %q", names())
+	}
+	checkFits(t, m, "all chats")
+}
+
+func TestDetailsPanel(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	msg := func(id, sender, name string, kind core.Kind, body, meta string) core.Message {
+		return core.Message{Platform: core.WhatsApp, ChatID: "trip", ID: id, SenderID: sender, SenderName: name,
+			Timestamp: now.Add(-time.Duration(10-len(id)) * time.Minute), Kind: kind, Body: body, Meta: meta}
+	}
+	err = st.Apply(core.BatchEvent{Platform: core.WhatsApp,
+		Chats: []core.Chat{{Platform: core.WhatsApp, ID: "trip", Name: "Weekend trip", IsGroup: true}},
+		Messages: []core.Message{
+			msg("1", "raj", "Raj", core.KindText, "Saturday 9am?", ""),
+			msg("22", "ann", "Ann", core.KindImage, "the view", ""),
+			msg("333", "ann", "Ann", core.KindLink, "https://github.com/mitansh/ttyl", "https://github.com/mitansh/ttyl"),
+			msg("4444", "raj", "Raj", core.KindDocument, "", "tickets.pdf"),
+			msg("55555", "raj", "Raj", core.KindVoice, "", "0:12"),
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := rules.New(nil)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{})
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, key("enter"))
+	view := m.View()
+	for _, want := range []string{"DETAILS", "Weekend trip", "3 people", "MEDIA", "photo · the view", "voice 0:12", "LINKS", "github.com/mitansh/ttyl", "FILES", "tickets.pdf", "PEOPLE", "Raj", "Ann"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("details missing %q:\n%s", want, view)
+		}
+	}
+	if m.chatW() >= m.rightW() || m.detailsW() < minDetailsW {
+		t.Errorf("chat %d / panel %d of %d", m.chatW(), m.detailsW(), m.rightW())
+	}
+	checkFits(t, m, "details panel")
+
+	// space then e hides it, and the choice survives a restart.
+	m = step(t, m, key(" "))
+	m = step(t, m, key("e"))
+	if m.detailsW() != 0 || strings.Contains(m.View(), "DETAILS") {
+		t.Error("space e did not hide the panel")
+	}
+	checkFits(t, m, "panel hidden")
+	if again := New(a); again.showDetails {
+		t.Error("hidden panel not remembered")
+	}
+	// Any other key after space is a normal key.
+	m = step(t, m, key(" "))
+	m = step(t, m, key("j"))
+	if m.leader {
+		t.Error("leader still pending")
+	}
+	m = step(t, m, key(" "))
+	m = step(t, m, key("e"))
+	if m.detailsW() == 0 {
+		t.Error("space e did not show the panel again")
+	}
+
+	// Too narrow: the chat keeps the room.
+	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 24})
+	if m.detailsW() != 0 {
+		t.Errorf("panel shown at 90 columns (%d)", m.detailsW())
+	}
+	checkFits(t, m, "narrow")
 }

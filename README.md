@@ -25,8 +25,10 @@ You open Instagram to answer one DM. Forty minutes later you've watched 63 reels
 haven't replied. ttyl fixes the "open app → get farmed" loop:
 
 - **only conversations.** stories, reels, channels, status updates: never fetched, never shown.
+- **only what's unread.** the chat list shows unread chats, grouped by app. everyone else is one
+  `/` away (`w:` WhatsApp, `i:` Instagram, `t:` Telegram), or press `a` for all chats.
 - **no "seen".** read receipts are off by default. reply when *you* want.
-- **media stays text.** `[photo]`, `[voice 0:12]`, `[reel] instagram.com/…`. nothing autoplays.
+- **media stays text.** an icon and a label (`photo`, `voice 0:12`, `reel instagram.com/…`). nothing autoplays.
   press `o` when you actually want to look.
 - **messages on your schedule.** set delivery windows (say 12:30 and 19:00) and everything in
   between waits. your people (VIPs) still get through.
@@ -45,7 +47,10 @@ never the point.
 | **Instagram** | your browser session cookies | 🧪 experimental |
 
 - Discord-style chat: who said what is obvious (colored names, avatars, "Today at 17:15")
+- a details panel next to the chat (`space` `e`): who it is, shared media, links, files, and who talks in a group
 - unread line, jump to first unread, search chats with `/`
+- loader with real counts when you come back to a big backlog
+- Nerd Font icons (JetBrainsMono Nerd Font etc.), with a plain-text fallback
 - edits, unsends and reactions show up; media downloads only when you press `o`
 - Gujarati, Hindi and emoji render correctly: ttyl measures how *your* terminal draws text at startup
 - messages encrypted on disk, sessions and keys in the macOS Keychain
@@ -90,7 +95,9 @@ close the window *without* logging out.
 | `enter` | open a chat · send |
 | `i` | reply |
 | `o` | open the selected photo / voice note / file |
-| `/` | search chats |
+| `/` | search every chat · `w:` `i:` `t:` for one app, e.g. `w: mom` |
+| `a` | all chats ↔ unread only |
+| `space` `e` | details panel on / off (remembered) |
 | `g` / `G` | top / bottom (going past the top loads older messages) |
 | `esc` | back · stop typing |
 | `?` | every key |
@@ -113,6 +120,9 @@ read_receipts = false          # true = send "seen" when you open a chat
 windows = ["12:30", "19:00"]   # hold messages until these times · [] = live
 vip = ["+919876543210"]        # WhatsApp numbers that skip the wait
 daily_minutes = 30             # 0 = no budget
+
+[ui]
+icons = true                   # Nerd Font icons · false if you see boxes
 
 [telegram]
 api_id = 1234567

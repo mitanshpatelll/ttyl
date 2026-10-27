@@ -12,7 +12,12 @@ import (
 
 type Config struct {
 	Focus    Focus    `toml:"focus"`
+	UI       UI       `toml:"ui"`
 	Telegram Telegram `toml:"telegram"`
+}
+
+type UI struct {
+	Icons bool `toml:"icons"` // Nerd Font icons; on unless the config turns them off
 }
 
 // Telegram needs your own API app: https://my.telegram.org → API development tools.
@@ -48,6 +53,11 @@ vip = []
 # Daily time budget in minutes (time with ttyl focused). 0 = no budget.
 # When it runs out ttyl locks; typing "extend" gives 5 more minutes.
 daily_minutes = 0
+
+[ui]
+# Icons need a Nerd Font in your terminal (e.g. JetBrainsMono Nerd Font).
+# Set to false if you see boxes or question marks.
+icons = true
 
 [telegram]
 # Telegram needs your own API app (free): https://my.telegram.org → API development tools.
@@ -93,7 +103,7 @@ func Load(dir string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	var cfg Config
+	cfg := Config{UI: UI{Icons: true}} // defaults for keys older config files don't have
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}

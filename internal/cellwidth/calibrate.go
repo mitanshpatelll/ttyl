@@ -22,6 +22,7 @@ var probes = []struct {
 	{"emoji zwj", "👨‍👩‍👧"}, // 2 if joined, 6 if not
 	{"vs16", "☺️"},         // 2 if the variation selector widens it, else 1
 	{"skin tone", "👍🏽"},    // 2 if the tone merges, else 4
+	{"icon", "\uf232"},     // a Nerd Font icon (private use): 1, or 2 in some setups
 }
 
 // Calibrate measures the terminal on in/out (a TTY) and returns the matching model and
@@ -53,6 +54,7 @@ func Calibrate(in, out *os.File, timeout time.Duration) (Model, map[string]int, 
 		JoinEmoji:   widths["emoji zwj"] == 2,
 		VS16Wide:    widths["vs16"] == 2,
 		ToneJoins:   widths["skin tone"] == 2,
+		IconWide:    widths["icon"] == 2,
 	}
 	return m, widths, nil
 }

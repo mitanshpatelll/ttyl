@@ -28,7 +28,7 @@ func TestGallery(t *testing.T) {
 		lipgloss.SetColorProfile(termenv.TrueColor)
 		lipgloss.SetHasDarkBackground(mode == "dark")
 	}
-	for _, size := range [][2]int{{110, 32}, {80, 24}} {
+	for _, size := range [][2]int{{170, 44}, {110, 32}, {80, 24}} {
 		gallery(t, size[0], size[1])
 	}
 }

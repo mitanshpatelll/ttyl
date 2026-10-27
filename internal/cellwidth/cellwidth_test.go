@@ -18,11 +18,20 @@ func TestDefaultMatchesUnicode(t *testing.T) {
 
 func TestModelsFollowTheTerminal(t *testing.T) {
 	defer Set(Default)
-	Set(Model{SpacingMark: 0, Conjunct: true, JoinEmoji: false, VS16Wide: false, ToneJoins: false})
-	cases := map[string]int{"જો": 1, "ક્ષ": 1, "👨‍👩‍👧": 6, "☺️": 1, "👍🏽": 4}
+	Set(Model{SpacingMark: 0, Conjunct: true, JoinEmoji: false, VS16Wide: false, ToneJoins: false, IconWide: true})
+	cases := map[string]int{"જો": 1, "ક્ષ": 1, "👨‍👩‍👧": 6, "☺️": 1, "👍🏽": 4, "\uf232": 2, "\U000f05a3 x": 4}
 	for s, want := range cases {
 		if got := String(s); got != want {
 			t.Errorf("String(%q) = %d, want %d", s, got, want)
+		}
+	}
+}
+
+func TestIconsTakeOneCellByDefault(t *testing.T) {
+	Set(Default)
+	for _, s := range []string{"\uf232", "\uf16d", "\U000f05a3"} {
+		if got := String(s); got != 1 {
+			t.Errorf("String(%q) = %d, want 1", s, got)
 		}
 	}
 }

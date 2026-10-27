@@ -35,7 +35,14 @@ func (m Model) chatHeader(w int) string {
 			details = append(details, p)
 		}
 	}
-	head := " " + dimStyle.Render("@ ") + style.Render(m.open.Title()) + "  " + platformTag(m.open.Platform)
+	lead := "@ "
+	if useIcons {
+		lead = iconUser.sp()
+		if m.open.IsGroup {
+			lead = iconGroup.sp()
+		}
+	}
+	head := " " + dimStyle.Render(lead) + style.Render(m.open.Title()) + "  " + platformTag(m.open.Platform)
 	if len(details) > 0 {
 		head += dimStyle.Render(" · " + strings.Join(details, " · "))
 	}
@@ -85,24 +92,49 @@ func (m Model) composer(w int) string {
 	return "  " + bg(lipgloss.NewStyle()).Render(" ") + fill(content, inner-1, inputBg) + "  "
 }
 
+// viewNoChat is the welcome screen: what is unread, how to find anyone, and the focus rules.
 func (m Model) viewNoChat(w, h int) []string {
-	delivery := "live, messages arrive as they come"
+	delivery := "live"
 	if !m.inbox.Next.IsZero() {
-		delivery = fmt.Sprintf("held until %s (%d waiting), VIPs come through", m.inbox.Next.Format("15:04"), m.inbox.Held)
+		delivery = fmt.Sprintf("held until %s · %d waiting", m.inbox.Next.Format("15:04"), m.inbox.Held)
 	}
-	receipts := "off, nobody sees \"seen\" from ttyl"
+	receipts := "off, nobody sees \"seen\""
 	if m.inbox.Receipts {
 		receipts = "on"
+	}
+	chats, msgs := 0, 0
+	for _, c := range m.inbox.Chats {
+		if c.Unread > 0 {
+			chats++
+			msgs += c.Unread
+		}
+	}
+	summary := lipgloss.NewStyle().Foreground(green).Render(iconCheck.sp()) + boldStyle.Render("All caught up")
+	if chats > 0 {
+		plural := func(n int, word string) string {
+			if n == 1 {
+				return "1 " + word
+			}
+			return fmt.Sprintf("%d %ss", n, word)
+		}
+		summary = accentStyle.Render(iconInbox.sp()) + boldStyle.Render(plural(msgs, "new message")+" in "+plural(chats, "chat"))
+	}
+	var apps []string
+	for _, p := range platformOrder {
+		apps = append(apps, keyStyle.Render(strings.ToLower(platformTags[p][:1])+":")+" "+platformTag(p))
 	}
 	block := []string{
 		accentStyle.Bold(true).Render("ttyl"),
 		"",
-		boldStyle.Render("Your messages, without the feed."),
-		dimStyle.Render("Pick a chat with ") + keyStyle.Render("j/k") + dimStyle.Render(" and ") + keyStyle.Render("enter") + dimStyle.Render("."),
+		summary,
+		"",
+		keyStyle.Render("/") + dimStyle.Render(" search anyone, or one app with"),
+		"  " + strings.Join(apps, "   "),
+		keyStyle.Render("j/k") + dimStyle.Render(" move  ") + keyStyle.Render("enter") + dimStyle.Render(" open  ") + keyStyle.Render("a") + dimStyle.Render(" all chats"),
 		"",
 		dimStyle.Render("Delivery       ") + delivery,
 		dimStyle.Render("Read receipts  ") + receipts,
-		dimStyle.Render("Feeds          ") + "stories and channels are never shown",
+		dimStyle.Render("Feeds          ") + "never shown",
 	}
 	if m.syncing() {
 		block = m.syncCard(w)
@@ -263,41 +295,46 @@ func (m *Model) message(msg core.Message, w int, header, selected bool, now time
 	return out
 }
 
-// mediaTag is the placeholder shown instead of media. Nothing autoplays or renders inline.
+// mediaTag is the placeholder shown instead of media: " voice 0:12", or "[voice 0:12]"
+// without icons. Nothing autoplays or renders inline.
 func mediaTag(msg core.Message) string {
-	with := func(tag, detail string) string {
-		if detail == "" {
-			return "[" + tag + "]"
+	with := func(ic icon, tag, detail string) string {
+		if detail != "" {
+			tag += " " + detail
 		}
-		return "[" + tag + " " + detail + "]"
+		if useIcons {
+			return ic.glyph + " " + tag
+		}
+		return "[" + tag + "]"
 	}
 	if msg.Deleted {
-		return "[message deleted]"
+		return with(iconDeleted, "message deleted", "")
 	}
+	ic := kindIcon(msg)
 	switch msg.Kind {
 	case core.KindImage:
-		return with("photo", msg.Meta)
+		return with(ic, "photo", msg.Meta)
 	case core.KindVideo:
-		return with("video", msg.Meta)
+		return with(ic, "video", msg.Meta)
 	case core.KindGIF:
-		return "[gif]"
+		return with(ic, "gif", "")
 	case core.KindVoice:
-		return with("voice", msg.Meta)
+		return with(ic, "voice", msg.Meta)
 	case core.KindAudio:
-		return with("audio", msg.Meta)
+		return with(ic, "audio", msg.Meta)
 	case core.KindDocument:
-		return with("file", msg.Meta)
+		return with(ic, "file", msg.Meta)
 	case core.KindSticker:
-		return "[sticker]"
+		return with(ic, "sticker", "")
 	case core.KindLocation:
-		return with("location", msg.Meta)
+		return with(ic, "location", msg.Meta)
 	case core.KindContact:
-		return with("contact", msg.Meta)
+		return with(ic, "contact", msg.Meta)
 	case core.KindPoll:
-		return "[poll]"
+		return with(ic, "poll", "")
 	case core.KindLink:
 		if isShortVideo(msg.Meta) {
-			return "[reel]"
+			return with(ic, "reel", "")
 		}
 	}
 	return ""

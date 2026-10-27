@@ -52,13 +52,18 @@ func (m Model) View() string {
 		return m.viewHelp()
 	}
 	lw, rw, bh := m.leftW(), m.rightW(), m.bodyH()
-	left, right := m.inboxLines(lw, bh), m.chatLines(rw, bh)
+	chatW, dw := m.chatW(), m.detailsW()
+	left, right := m.inboxLines(lw, bh), m.chatLines(chatW, bh)
+	panel, panelHead := make([]string, bh), ""
+	if dw > 0 {
+		panel, panelHead = m.detailsLines(dw, bh), m.detailsHeading(dw)
+	}
 
 	out := make([]string, 0, m.height)
 	out = append(out, m.sidebarTop(lw)+cw.Pad(m.chatHeader(rw), rw))
-	out = append(out, m.inboxHeader(lw)+dimStyle.Render(strings.Repeat("─", rw)))
+	out = append(out, m.inboxHeader(lw)+dimStyle.Render(strings.Repeat("─", chatW))+panelHead)
 	for i := range bh {
-		out = append(out, left[i]+cw.Pad(right[i], rw))
+		out = append(out, left[i]+cw.Pad(right[i], chatW)+panel[i])
 	}
 	out = append(out, cw.Pad(m.footer(m.width), m.width))
 	return strings.Join(out, "\n")
@@ -78,25 +83,30 @@ func (m Model) sidebarTop(w int) string {
 		if s, ok := m.inbox.Sync[id]; ok {
 			line += m.syncTag(id, s, sidebarBg)
 		} else {
-			line += statusText(platformTags[id], m.inbox.Status[id], sidebarBg)
+			line += statusText(id, m.inbox.Status[id], sidebarBg)
 		}
 	}
 	return fill(line, w, sidebarBg)
 }
 
-func statusText(name string, s core.StatusEvent, bg lipgloss.TerminalColor) string {
+// statusText is a platform in the top bar: its icon (or a dot) colored by connection state.
+func statusText(id core.PlatformID, s core.StatusEvent, bg lipgloss.TerminalColor) string {
 	style := func(c lipgloss.TerminalColor) lipgloss.Style { return lipgloss.NewStyle().Foreground(c).Background(bg) }
+	dot, name := "●", platformTags[id]
+	if useIcons {
+		dot = platformIcons[id].glyph
+	}
 	switch s.State {
 	case core.StateConnected:
-		return style(green).Render("●") + style(faint).Render(" "+name)
+		return style(green).Render(dot) + style(faint).Render(" "+name)
 	case core.StateLoggedOut:
-		return style(red).Render("● " + name + " logged out")
+		return style(red).Render(dot + " " + name + " logged out")
 	}
 	detail := "connecting"
 	if s.Detail != "" {
 		detail = s.Detail
 	}
-	return style(yellow).Render("●") + style(faint).Render(" "+name+" ") + style(yellow).Render(detail)
+	return style(yellow).Render(dot) + style(faint).Render(" "+name+" ") + style(yellow).Render(detail)
 }
 
 // statusRight is only what differs from normal: held messages, the budget, receipts on.
@@ -135,15 +145,17 @@ func minutes(d time.Duration) string {
 
 func (m Model) footer(w int) string {
 	var hints string
-	switch m.focus {
-	case focusFilter:
-		hints = keyHints("type", "to search", "enter", "keep", "esc", "clear")
-	case focusCompose:
+	switch {
+	case m.leader:
+		hints = keyHints("space", "then", "e", "details panel", "esc", "cancel")
+	case m.focus == focusFilter:
+		hints = keyHints("type", "a name", "w: i: t:", "one app", "enter", "keep", "esc", "clear")
+	case m.focus == focusCompose:
 		hints = keyHints("enter", "send", "esc", "stop typing")
-	case focusChat:
-		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "esc", "back", "?", "help")
+	case m.focus == focusChat:
+		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "space e", "details", "esc", "back", "?", "help")
 	default:
-		hints = keyHints("j/k", "move", "enter", "open", "i", "reply", "/", "search", "?", "help", "q", "quit")
+		hints = keyHints("j/k", "move", "enter", "open", "/", "search", "a", "all chats", "space e", "details", "?", "help", "q", "quit")
 	}
 	status := errorStyle.Render(m.flash)
 	if m.flash == "" {
@@ -152,26 +164,47 @@ func (m Model) footer(w int) string {
 	return spread(" "+hints, status+" ", w)
 }
 
-var helpSections = []struct {
+type helpSection struct {
 	title string
 	keys  [][2]string
-}{
-	{"Inbox", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "search by name"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
-	{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to inbox"}}},
-	{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
-	{"Anywhere", [][2]string{{"?", "this help"}, {"q", "quit (outside text input)"}, {"ctrl+c", "quit"}}},
+}
+
+// helpColumns are shown side by side so the whole list fits a 24-line terminal.
+var helpColumns = [2][]helpSection{
+	{
+		{"Chat list", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"/", "search all chats"}, {"w: i: t:", "search one app only"}, {"a", "all chats / unread"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
+		{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
+	},
+	{
+		{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to the list"}}},
+		{"Anywhere", [][2]string{{"space e", "details on / off"}, {"?", "this help"}, {"q", "quit (not while typing)"}, {"ctrl+c", "quit"}}},
+	},
 }
 
 func (m Model) viewHelp() string {
-	var body []string
-	for _, sec := range helpSections {
-		body = append(body, "", " "+accentStyle.Bold(true).Render(sec.title))
-		for _, k := range sec.keys {
-			body = append(body, "   "+keyStyle.Render(fmt.Sprintf("%-10s", k[0]))+" "+dimStyle.Render(k[1]))
+	const colW = 36
+	var cols [2][]string
+	for i, sections := range helpColumns {
+		for _, sec := range sections {
+			cols[i] = append(cols[i], "", " "+accentStyle.Bold(true).Render(sec.title))
+			for _, k := range sec.keys {
+				cols[i] = append(cols[i], "   "+keyStyle.Render(fmt.Sprintf("%-9s", k[0]))+" "+dimStyle.Render(k[1]))
+			}
 		}
 	}
+	var body []string
+	for i := range max(len(cols[0]), len(cols[1])) {
+		var l, r string
+		if i < len(cols[0]) {
+			l = cols[0][i]
+		}
+		if i < len(cols[1]) {
+			r = cols[1][i]
+		}
+		body = append(body, cw.Pad(l, colW)+r)
+	}
 	body = append(body, "", " "+dimStyle.Render("any key closes · run ttyl stats for your week"))
-	return m.centered(panel("Keys", "", body, 54, len(body)+3, true, -1))
+	return m.centered(panel("Keys", "", body, 2*colW+2, len(body)+3, true, -1))
 }
 
 func (m Model) viewLocked() string {

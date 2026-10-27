@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -64,8 +65,9 @@ type Model struct {
 	inbox    app.Inbox
 	visible  []core.ChatSummary // inbox after filter
 	cursor   int
-	offset   int
+	offset   int    // first sidebar line shown
 	selected string // chat under the cursor, kept across reloads
+	showAll  bool   // every chat, not only unread ones
 
 	open       *core.Chat
 	messages   []core.Message
@@ -88,7 +90,12 @@ type Model struct {
 	focused    bool      // terminal has focus; only focused time counts toward the budget
 	activeFrom time.Time // start of the focused time not yet recorded
 
-	help bool // ? overlay
+	help   bool // ? overlay
+	leader bool // space was pressed: the next key is a command (e: details)
+
+	showDetails bool        // details panel next to the chat
+	det         app.Details // for the chat in detKey
+	detKey      string
 
 	spin     spinner.Model // catch-up loader
 	spinning bool          // spinner ticks are running
@@ -100,7 +107,7 @@ type Model struct {
 func New(a *app.App) Model {
 	filter := textinput.New()
 	filter.Prompt = ""
-	filter.Placeholder = "search chats"
+	filter.Placeholder = "name, or w: i: t: + name"
 	compose := textinput.New()
 	compose.Prompt = ""
 	compose.Placeholder = "Write a message…"
@@ -115,7 +122,8 @@ func New(a *app.App) Model {
 	extend.Prompt = "> "
 	extend.Placeholder = `type "extend" for 5 more minutes`
 	return Model{app: a, filter: filter, compose: compose, extend: extend, chatView: viewport.New(0, 0),
-		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now()}
+		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now(),
+		showDetails: a.Pref(detailsPref) != "off"}
 }
 
 // takeActive returns focused time since the last call.
@@ -205,13 +213,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
-		return m, nil
+		return m, m.loadDetails()
 
 	case RefreshMsg:
-		return m, tea.Batch(m.loadInbox(), m.loadChat())
+		return m, tea.Batch(m.loadInbox(), m.loadChat(), m.loadDetails())
 
 	case tickMsg:
-		return m, tea.Batch(m.recordActive(m.takeActive(time.Now())), m.loadInbox(), m.loadChat(), tick())
+		return m, tea.Batch(m.recordActive(m.takeActive(time.Now())), m.loadInbox(), m.loadChat(), m.loadDetails(), tick())
+
+	case detailsMsg:
+		if msg.err != nil {
+			m.flash = msg.err.Error()
+		} else if m.open != nil && chatKey(*m.open) == msg.chatKey {
+			m.det, m.detKey = msg.details, msg.chatKey
+		}
+		return m, nil
 
 	case tea.FocusMsg:
 		m.focused, m.activeFrom = true, time.Now()
@@ -387,6 +403,22 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 
+	// space starts a two-key command outside text input: space e toggles the details panel.
+	if !typing {
+		if m.leader {
+			m.leader = false
+			if k.String() == "e" {
+				return m, m.toggleDetails()
+			}
+			if k.String() == "esc" {
+				return m, nil
+			}
+		} else if k.String() == " " {
+			m.leader = true
+			return m, nil
+		}
+	}
+
 	switch m.focus {
 	case focusFilter:
 		switch k.String() {
@@ -475,6 +507,13 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focus = focusFilter
 			m.layout()
 			cmd = m.filter.Focus()
+		case "a":
+			m.showAll = !m.showAll
+			m.applyFilter()
+			m.note = "showing unread chats only"
+			if m.showAll {
+				m.note = "showing all chats"
+			}
 		case "esc":
 			if m.filter.Value() != "" {
 				m.filter.Reset()
@@ -511,12 +550,13 @@ func (m *Model) openSelected(f focus) tea.Cmd {
 		m.limit = app.HistoryPage
 		m.chatView.SetContent("")
 		m.compose.Reset()
+		m.layout() // the details panel may take part of the chat area now
 	}
 	m.setFocus(f)
 	if f == focusCompose {
-		return tea.Batch(m.loadChat(), m.compose.Focus())
+		return tea.Batch(m.loadChat(), m.loadDetails(), m.compose.Focus())
 	}
-	return m.loadChat()
+	return tea.Batch(m.loadChat(), m.loadDetails())
 }
 
 func (m *Model) selectMessage(i int) {
@@ -555,14 +595,28 @@ func (m *Model) move(delta int) {
 	m.scrollInbox()
 }
 
+// applyFilter picks the chats the sidebar lists: unread ones (plus the open and the selected
+// chat, so reading one doesn't pull it away), every chat with showAll, or search matches.
+// They are grouped by platform.
 func (m *Model) applyFilter() {
-	q := strings.ToLower(strings.TrimSpace(m.filter.Value()))
+	platform, q := searchQuery(m.filter.Value())
+	keep := map[string]bool{m.selected: true}
+	if m.open != nil {
+		keep[chatKey(*m.open)] = true
+	}
 	m.visible = nil
 	for _, c := range m.inbox.Chats {
-		if q == "" || strings.Contains(strings.ToLower(c.Title()), q) {
-			m.visible = append(m.visible, c)
+		switch {
+		case m.searching():
+			if (platform != "" && c.Platform != platform) || !strings.Contains(strings.ToLower(c.Title()), q) {
+				continue
+			}
+		case !m.showAll && c.Unread == 0 && !keep[chatKey(c.Chat)]:
+			continue
 		}
+		m.visible = append(m.visible, c)
 	}
+	slices.SortStableFunc(m.visible, func(a, b core.ChatSummary) int { return platformRank(a.Platform) - platformRank(b.Platform) })
 	m.cursor = 0
 	for i, c := range m.visible {
 		if chatKey(c.Chat) == m.selected {
@@ -589,23 +643,37 @@ func (m *Model) clearUnread(key string) {
 	}
 }
 
+// scrollInbox keeps the selected chat in view, with its section heading when it is the first.
 func (m *Model) scrollInbox() {
-	rows := m.rows()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
+	h := m.bodyH()
+	items := m.sideItems()
+	y, top, bottom := 0, -1, -1
+	for i, it := range items {
+		if it.kind == sideChat && it.chat == m.cursor {
+			top, bottom = y, y+it.height()-1
+			if i > 0 && items[i-1].kind == sideHeading {
+				top -= items[i-1].height()
+			}
+		}
+		y += it.height()
 	}
-	if m.cursor >= m.offset+rows {
-		m.offset = m.cursor - rows + 1
+	if top >= 0 {
+		if bottom >= m.offset+h {
+			m.offset = bottom - h + 1
+		}
+		if top < m.offset {
+			m.offset = top
+		}
 	}
-	m.offset = min(max(m.offset, 0), max(0, len(m.visible)-rows))
+	m.offset = min(max(m.offset, 0), max(0, y-h))
 }
 
 // layout resizes the inner components after a window or mode change.
 func (m *Model) layout() {
-	rw := m.rightW()
-	m.chatView.Width = rw
+	w := m.chatW()
+	m.chatView.Width = w
 	m.chatView.Height = max(1, m.bodyH()-composerH)
-	m.compose.Width = max(1, rw-9)
+	m.compose.Width = max(1, w-9)
 	m.filter.Width = max(1, m.leftW()-12)
 	m.renderChat()
 	m.showSelected()
