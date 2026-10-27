@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/rs/zerolog"
 
@@ -67,7 +68,7 @@ func run(cmd tea.Cmd) []tea.Msg {
 		return out
 	}
 	switch msg.(type) {
-	case nil, tickMsg:
+	case nil, tickMsg, spinner.TickMsg:
 		return nil
 	}
 	return []tea.Msg{msg}
@@ -426,4 +427,60 @@ func TestOpeningJumpsToFirstUnread(t *testing.T) {
 		t.Errorf("divider not in view:\n%s", m.View())
 	}
 	checkFits(t, m, "jump to unread")
+}
+
+func TestCatchUpLoader(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, _ := rules.New(nil)
+	wa := &onlinePlatform{id: core.WhatsApp, events: make(chan core.Event, 4)}
+	tg := &onlinePlatform{id: core.Telegram, events: make(chan core.Event, 4)}
+	ig := &onlinePlatform{id: core.Instagram, events: make(chan core.Event, 4)}
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, wa, tg, ig)
+	wa.events <- core.SyncEvent{Platform: core.WhatsApp, Active: true, Done: 768, Total: 1234, Unit: "messages"}
+	tg.events <- core.SyncEvent{Platform: core.Telegram, Active: true, Done: 3, Total: 40, Unit: "chats"}
+	ig.events <- core.SyncEvent{Platform: core.Instagram, Active: true, Unit: "chats"}
+	a.Drain()
+
+	for _, size := range [][2]int{{110, 30}, {80, 24}} {
+		m := New(a)
+		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m = step(t, m, RefreshMsg{})
+		label := fmt.Sprintf("loader %dx%d", size[0], size[1])
+		checkFits(t, m, label)
+		view := m.View()
+		for _, want := range []string{"WA 62%", "TG 7%", "Catching up on what you missed", "768 of 1,234 messages", "3 of 40 chats", "loading chats…", "Syncing your chats"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("%s: missing %q:\n%s", label, want, view)
+			}
+		}
+		if !m.spinning {
+			t.Errorf("%s: spinner not started", label)
+		}
+	}
+
+	// Done everywhere: the welcome text comes back and the spinner stops at its next tick.
+	m := New(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = step(t, m, RefreshMsg{})
+	wa.events <- core.SyncEvent{Platform: core.WhatsApp}
+	tg.events <- core.SyncEvent{Platform: core.Telegram}
+	ig.events <- core.SyncEvent{Platform: core.Instagram}
+	a.Drain()
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, m.spin.Tick())
+	if m.spinning || strings.Contains(m.View(), "Catching up") || !strings.Contains(m.View(), "without the feed") {
+		t.Errorf("loader still up after sync finished (spinning=%v):\n%s", m.spinning, m.View())
+	}
+}
+
+func TestCommas(t *testing.T) {
+	for n, want := range map[int]string{0: "0", 999: "999", 1000: "1,000", 1234567: "1,234,567", -4500: "-4,500"} {
+		if got := commas(n); got != want {
+			t.Errorf("commas(%d) = %q, want %q", n, got, want)
+		}
+	}
 }

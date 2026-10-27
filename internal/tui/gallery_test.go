@@ -117,6 +117,14 @@ func gallery(t *testing.T, width, height int) {
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("?"))
 		shot("help")
+
+		wa1.events <- core.SyncEvent{Platform: wa, Active: true, Done: 768, Total: 1234, Unit: "messages"}
+		tg1.events <- core.SyncEvent{Platform: tg, Active: true, Done: 3, Total: 40, Unit: "chats"}
+		a.Drain()
+		m = New(a)
+		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m = step(t, m, RefreshMsg{})
+		shot("catching up after a long break")
 	}
 	_ = strings.TrimSpace
 }

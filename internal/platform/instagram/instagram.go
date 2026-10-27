@@ -237,6 +237,8 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.status(core.StateConnecting, "")
 	go func() {
 		defer done()
+		c.emit(core.SyncEvent{Platform: core.Instagram, Active: true, Unit: "chats"}) // size unknown until the inbox arrives
+		defer c.emit(core.SyncEvent{Platform: core.Instagram})
 		cli, mailbox, err := c.open(ctx, ck)
 		if err != nil {
 			c.log.Error().Err(err).Msg("instagram")

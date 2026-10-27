@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,6 +90,9 @@ type Model struct {
 
 	help bool // ? overlay
 
+	spin     spinner.Model // catch-up loader
+	spinning bool          // spinner ticks are running
+
 	flash string // last error, cleared on the next key press
 	note  string // last info message, cleared on the next key press
 }
@@ -111,7 +115,7 @@ func New(a *app.App) Model {
 	extend.Prompt = "> "
 	extend.Placeholder = `type "extend" for 5 more minutes`
 	return Model{app: a, filter: filter, compose: compose, extend: extend, chatView: viewport.New(0, 0),
-		focused: true, activeFrom: time.Now()}
+		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now()}
 }
 
 // takeActive returns focused time since the last call.
@@ -222,6 +226,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flash = msg.err.Error()
 		return m, nil
 
+	case spinner.TickMsg:
+		if !m.syncing() {
+			m.spinning = false
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spin, cmd = m.spin.Update(msg)
+		return m, cmd
+
 	case inboxMsg:
 		if msg.err != nil {
 			m.flash = msg.err.Error()
@@ -241,7 +254,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, nil
+		return m, m.startSpinner()
 
 	case messagesMsg:
 		if msg.err != nil {

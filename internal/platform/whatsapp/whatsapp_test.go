@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -117,5 +118,52 @@ func TestExtension(t *testing.T) {
 		if got := extension(mt); got != want {
 			t.Errorf("extension(%q) = %q, want %q", mt, got, want)
 		}
+	}
+}
+
+func TestOfflineSyncProgress(t *testing.T) {
+	c, err := New(context.Background(), filepath.Join(t.TempDir(), "wa.db"), zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncs := func() []core.SyncEvent {
+		var out []core.SyncEvent
+		for {
+			select {
+			case evt := <-c.events:
+				if s, ok := evt.(core.SyncEvent); ok {
+					out = append(out, s)
+				}
+			default:
+				return out
+			}
+		}
+	}
+
+	c.handle(&events.OfflineSyncPreview{Total: 80, Messages: 30, Receipts: 50})
+	for range 30 {
+		c.handle(&events.UndecryptableMessage{})
+	}
+	c.handle(&events.OfflineSyncCompleted{Count: 80})
+	want := []core.SyncEvent{
+		{Platform: core.WhatsApp, Active: true, Total: 30, Unit: "messages"},
+		{Platform: core.WhatsApp, Active: true, Done: 25, Total: 30, Unit: "messages"},
+		{Platform: core.WhatsApp, Active: true, Done: 30, Total: 30, Unit: "messages"},
+		{Platform: core.WhatsApp},
+	}
+	if got := syncs(); !slices.Equal(got, want) {
+		t.Errorf("offline sync events = %+v, want %+v", got, want)
+	}
+
+	// Only receipts missed: nothing worth a loader. A dropped connection also ends counting.
+	c.handle(&events.OfflineSyncPreview{Total: 5, Receipts: 5})
+	c.handle(&events.UndecryptableMessage{})
+	c.handle(&events.OfflineSyncCompleted{Count: 5})
+	c.handle(&events.OfflineSyncPreview{Total: 9, Messages: 9})
+	c.handle(&events.Disconnected{})
+	c.handle(&events.UndecryptableMessage{})
+	c.handle(&events.OfflineSyncCompleted{})
+	if got := syncs(); len(got) != 1 || got[0].Total != 9 {
+		t.Errorf("after receipts-only and dropped syncs = %+v, want only the 9-message start", got)
 	}
 }

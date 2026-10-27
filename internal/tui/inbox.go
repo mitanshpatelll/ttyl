@@ -59,8 +59,11 @@ func (m Model) inboxLines(w, h int) []string {
 	if len(m.visible) == 0 {
 		bg := on(sidebarBg)
 		msg := []string{bg(boldStyle).Render("Waiting for your chats"), "", bg(dimStyle).Render("The first sync after linking"), bg(dimStyle).Render("can take a few minutes.")}
-		if m.filter.Value() != "" {
+		switch {
+		case m.filter.Value() != "":
 			msg = []string{bg(dimStyle).Render("No chat matches “" + m.filter.Value() + "”")}
+		case m.syncing():
+			msg = []string{m.spinFrame(sidebarBg) + bg(boldStyle).Render(" Syncing your chats"), "", bg(dimStyle).Render("Hang tight, this can take"), bg(dimStyle).Render("a few minutes.")}
 		}
 		for range (h - len(msg)) / 2 {
 			lines = append(lines, "")

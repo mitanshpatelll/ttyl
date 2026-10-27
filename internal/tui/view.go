@@ -74,9 +74,11 @@ func (m Model) sidebarTop(w int) string {
 	}
 	slices.Sort(ids)
 	for _, id := range ids {
-		line += bg(lipgloss.NewStyle()).Render("  ") + statusText(platformTags[id], m.inbox.Status[id], sidebarBg)
-		if p := m.inbox.Sync[id]; p > 0 && p < 100 {
-			line += bg(dimStyle).Render(fmt.Sprintf(" %d%%", p))
+		line += bg(lipgloss.NewStyle()).Render("  ")
+		if s, ok := m.inbox.Sync[id]; ok {
+			line += m.syncTag(id, s, sidebarBg)
+		} else {
+			line += statusText(platformTags[id], m.inbox.Status[id], sidebarBg)
 		}
 	}
 	return fill(line, w, sidebarBg)

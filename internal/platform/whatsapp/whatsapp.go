@@ -36,7 +36,16 @@ type Client struct {
 
 	mu         sync.Mutex
 	knownGroup map[string]bool // groups whose name we have fetched this session
+	offline    offlineSync
 }
+
+// offlineSync counts the missed messages the server delivers right after connecting.
+type offlineSync struct {
+	total, done int
+}
+
+// offlineStep is how many delivered messages pass between progress reports.
+const offlineStep = 25
 
 // New opens the session database at dbPath. Session keys live there: anyone with this file is logged in as you.
 func New(ctx context.Context, dbPath string, log zerolog.Logger) (*Client, error) {
@@ -212,6 +221,20 @@ func (c *Client) handle(evt any) {
 		if len(batch.Messages)+len(batch.Edits)+len(batch.Deletes)+len(batch.Reactions) > 0 {
 			c.emit(batch)
 		}
+		c.countOffline()
+	case *events.UndecryptableMessage:
+		c.countOffline()
+	case *events.OfflineSyncPreview:
+		c.mu.Lock()
+		c.offline = offlineSync{total: v.Messages}
+		c.mu.Unlock()
+		if v.Messages > 0 {
+			c.emit(core.SyncEvent{Platform: core.WhatsApp, Active: true, Total: v.Messages, Unit: "messages"})
+		}
+	case *events.OfflineSyncCompleted:
+		if c.resetOffline() {
+			c.emit(core.SyncEvent{Platform: core.WhatsApp})
+		}
 	case *events.HistorySync:
 		c.handleHistory(v)
 	case *events.Receipt:
@@ -224,6 +247,7 @@ func (c *Client) handle(evt any) {
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateConnected})
 		go c.refreshNames()
 	case *events.Disconnected:
+		c.resetOffline() // the server starts over with a new preview after reconnecting
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: "reconnecting"})
 	case *events.StreamReplaced:
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateDisconnected, Detail: "another ttyl took over this session"})
@@ -291,7 +315,35 @@ func (c *Client) handleHistory(v *events.HistorySync) {
 		}
 	}
 	c.emit(batch)
-	c.emit(core.SyncEvent{Platform: core.WhatsApp, Progress: int(v.Data.GetProgress())})
+	if v.Data.Progress != nil { // only the bulk syncs after linking report progress
+		p := int(v.Data.GetProgress())
+		c.emit(core.SyncEvent{Platform: core.WhatsApp, Active: p < 100, Done: p, Total: 100, Unit: "%"})
+	}
+}
+
+// countOffline reports progress every few messages while missed ones are being delivered.
+func (c *Client) countOffline() {
+	c.mu.Lock()
+	o := &c.offline
+	if o.total == 0 {
+		c.mu.Unlock()
+		return
+	}
+	o.done++
+	done, total := o.done, o.total
+	c.mu.Unlock()
+	if done%offlineStep == 0 || done == total {
+		c.emit(core.SyncEvent{Platform: core.WhatsApp, Active: true, Done: min(done, total), Total: total, Unit: "messages"})
+	}
+}
+
+// resetOffline stops counting and reports whether an offline sync was in progress.
+func (c *Client) resetOffline() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	active := c.offline.total > 0
+	c.offline = offlineSync{}
+	return active
 }
 
 // refreshNames pushes contact and group names known to WhatsApp into the store.

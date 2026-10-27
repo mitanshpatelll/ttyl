@@ -21,6 +21,9 @@ const HistoryPage = 300
 // ExtensionStep is how much one "extend" adds to today's time budget.
 const ExtensionStep = 5 * time.Minute
 
+// SyncTimeout hides a catch-up that stopped reporting, so a lost "done" can't leave the loader up.
+const SyncTimeout = 45 * time.Second
+
 type Options struct {
 	Store        *store.Store
 	Rules        rules.Rules
@@ -44,9 +47,14 @@ type App struct {
 
 	mu     sync.Mutex
 	status map[core.PlatformID]core.StatusEvent
-	sync   map[core.PlatformID]int
+	sync   map[core.PlatformID]syncState
 
 	changed chan struct{}
+}
+
+type syncState struct {
+	core.SyncEvent
+	at time.Time
 }
 
 // Inbox is everything the UI needs for one refresh.
@@ -55,7 +63,7 @@ type Inbox struct {
 	Held     int       // incoming messages waiting for the next delivery window
 	Next     time.Time // next delivery window; zero when delivery is live
 	Status   map[core.PlatformID]core.StatusEvent
-	Sync     map[core.PlatformID]int
+	Sync     map[core.PlatformID]core.SyncEvent // platforms catching up right now
 	Receipts bool
 	Used     time.Duration // ttyl time today
 	Limit    time.Duration // today's budget including extensions; 0 = no budget
@@ -75,7 +83,7 @@ func New(o Options, platforms ...core.Platform) *App {
 		platforms:    map[core.PlatformID]core.Platform{},
 		log:          o.Log,
 		status:       map[core.PlatformID]core.StatusEvent{},
-		sync:         map[core.PlatformID]int{},
+		sync:         map[core.PlatformID]syncState{},
 		changed:      make(chan struct{}, 1),
 	}
 	if a.reveal == nil {
@@ -140,7 +148,7 @@ func (a *App) handle(evt core.Event) {
 		a.mu.Unlock()
 	case core.SyncEvent:
 		a.mu.Lock()
-		a.sync[v.Platform] = v.Progress
+		a.sync[v.Platform] = syncState{v, time.Now()}
 		a.mu.Unlock()
 	}
 	select {
@@ -162,7 +170,7 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 	if err != nil {
 		return Inbox{}, err
 	}
-	in := Inbox{Chats: chats, Held: held, Receipts: a.readReceipts, Status: map[core.PlatformID]core.StatusEvent{}, Sync: map[core.PlatformID]int{}}
+	in := Inbox{Chats: chats, Held: held, Receipts: a.readReceipts, Status: map[core.PlatformID]core.StatusEvent{}, Sync: map[core.PlatformID]core.SyncEvent{}}
 	if !a.rules.Live() {
 		in.Next = a.rules.Next(now)
 	}
@@ -179,7 +187,10 @@ func (a *App) Inbox(now time.Time) (Inbox, error) {
 		in.Status[k] = v
 	}
 	for k, v := range a.sync {
-		in.Sync[k] = v
+		state := a.status[k].State
+		if v.Active && now.Sub(v.at) < SyncTimeout && state != core.StateDisconnected && state != core.StateLoggedOut {
+			in.Sync[k] = v.SyncEvent
+		}
 	}
 	a.mu.Unlock()
 	return in, nil

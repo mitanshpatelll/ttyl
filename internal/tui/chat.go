@@ -104,6 +104,9 @@ func (m Model) viewNoChat(w, h int) []string {
 		dimStyle.Render("Read receipts  ") + receipts,
 		dimStyle.Render("Feeds          ") + "stories and channels are never shown",
 	}
+	if m.syncing() {
+		block = m.syncCard(w)
+	}
 	// Left-aligned lines, centered as one block, so the labels line up.
 	blockW := 0
 	for _, l := range block {

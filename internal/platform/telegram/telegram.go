@@ -395,9 +395,18 @@ func (c *Client) catchUp(ctx context.Context) {
 		}
 	}
 	c.emit(batch)
+	if len(targets) == 0 {
+		return
+	}
 
+	progress := func(done int) {
+		c.emit(core.SyncEvent{Platform: core.Telegram, Active: done < len(targets), Done: done, Total: len(targets), Unit: "chats"})
+	}
+	progress(0)
+	defer progress(len(targets)) // also clears the loader when stopped early
 	for i, t := range targets {
 		if i > 0 {
+			progress(i)
 			select {
 			case <-ctx.Done():
 				return

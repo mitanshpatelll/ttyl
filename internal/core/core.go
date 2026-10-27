@@ -167,10 +167,14 @@ type StatusEvent struct {
 	Detail   string
 }
 
-// SyncEvent reports history sync progress in percent.
+// SyncEvent reports catching up on what arrived while ttyl was closed. Send one with Active
+// false when done. Total is 0 while the amount is still unknown.
 type SyncEvent struct {
 	Platform PlatformID
-	Progress int
+	Active   bool
+	Done     int
+	Total    int
+	Unit     string // what is counted: "messages", "chats" or "%"
 }
 
 func (BatchEvent) isEvent()  {}
