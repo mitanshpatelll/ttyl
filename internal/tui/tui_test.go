@@ -891,3 +891,94 @@ func TestSentAndSeen(t *testing.T) {
 	}
 	checkFits(t, m, "seen")
 }
+
+func TestNotifications(t *testing.T) {
+	var sent []string
+	SetNotify(func(title, body string) error { sent = append(sent, title+" | "+body); return nil }, true, true)
+	defer SetNotify(nil, true, true)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	n := 0
+	say := func(chat, name, body string) {
+		n++
+		st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: chat, Name: name}},
+			Messages: []core.Message{{Platform: core.WhatsApp, ChatID: chat, ID: fmt.Sprint(n), SenderID: chat, SenderName: name,
+				Timestamp: now.Add(time.Duration(n) * time.Second), Kind: core.KindText, Body: body}}})
+	}
+	say("raj", "Raj", "yo")
+	say("mom", "Mom", "hi") // newest, so first in the list
+	r, _ := rules.New(nil)
+	m := readyNew(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m = step(t, m, tea.WindowSizeMsg{Width: 110, Height: 30})
+	m = step(t, m, RefreshMsg{})
+	if m.notes.toast != nil || len(sent) != 0 {
+		t.Fatal("what was there at the start is not news")
+	}
+
+	m = step(t, m, key("enter")) // open Mom (first in the list)
+	say("mom", "Mom", "did you eat?")
+	m = step(t, m, RefreshMsg{})
+	if m.notes.toast != nil {
+		t.Error("no toast for the chat on screen")
+	}
+	say("raj", "Raj", "game tonight?")
+	m = step(t, m, RefreshMsg{})
+	if m.notes.toast == nil || !strings.Contains(m.View(), "game tonight?") || len(sent) != 0 {
+		t.Fatalf("toast for another chat (and no desktop one while focused):\n%s", m.View())
+	}
+	checkFits(t, m, "toast")
+	m = step(t, m, toastDoneMsg{m.notes.toast.id})
+	if m.notes.toast != nil {
+		t.Error("toast should go after its time")
+	}
+
+	// In the background: a desktop notification, even for the open chat.
+	m = step(t, m, tea.BlurMsg{})
+	say("mom", "Mom", "call me")
+	m = step(t, m, RefreshMsg{})
+	if len(sent) != 1 || sent[0] != "Mom · WhatsApp | call me" {
+		t.Fatalf("desktop = %q", sent)
+	}
+	// More within desktopGap wait, then come as one.
+	say("raj", "Raj", "?")
+	say("mom", "Mom", "hello??")
+	m = step(t, m, RefreshMsg{})
+	if len(sent) != 1 || !m.notes.flushDue {
+		t.Fatalf("should wait: %q", sent)
+	}
+	m.notes.lastDesktop = time.Now().Add(-desktopGap)
+	m = step(t, m, desktopFlushMsg{})
+	if len(sent) != 2 || sent[1] != "2 new messages in 2 chats | Mom, Raj" {
+		t.Errorf("summary = %q", sent)
+	}
+
+	// Without previews only who wrote shows.
+	SetNotify(func(title, body string) error { sent = append(sent, title+" | "+body); return nil }, false, true)
+	m.notes.lastDesktop = time.Time{}
+	say("raj", "Raj", "secret")
+	m = step(t, m, RefreshMsg{})
+	if last := sent[len(sent)-1]; last != "Raj · WhatsApp | New message" {
+		t.Errorf("no preview = %q", last)
+	}
+
+	// Back in front: nothing more piles up.
+	m = step(t, m, tea.FocusMsg{})
+	if len(m.notes.pending) != 0 {
+		t.Error("pending should clear when you come back")
+	}
+
+	// Not during the startup loader.
+	before := len(sent)
+	m.ready = false
+	m = step(t, m, tea.BlurMsg{})
+	say("raj", "Raj", "while loading")
+	m = step(t, m, RefreshMsg{})
+	if len(sent) != before {
+		t.Errorf("notified during startup: %q", sent[before:])
+	}
+}

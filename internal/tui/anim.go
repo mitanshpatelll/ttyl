@@ -60,13 +60,15 @@ type motion struct {
 	scroll       spring // the chat's shown scroll position
 	scrollKey    string // a different chat, width or history means jump, not scroll
 	search       spring // 0 → 100 as the search box comes in
+	toast        spring // 0 → 100 as a toast slides in
+	toastID      int
 	bars         map[core.PlatformID]*spring
 	twoPaneShown bool
 }
 
 func newMotion() motion {
 	// Speeds: about a third of a second to settle, quick enough not to wait on.
-	return motion{side: newSpring(18), panel: newSpring(18), scroll: newSpring(20), search: newSpring(22),
+	return motion{side: newSpring(18), panel: newSpring(18), scroll: newSpring(20), search: newSpring(22), toast: newSpring(16),
 		bars: map[core.PlatformID]*spring{}}
 }
 
@@ -115,6 +117,19 @@ func (m *Model) retarget(msg tea.Msg) tea.Cmd {
 		a.search.target = 100
 	}
 
+	switch t := m.notes.toast; {
+	case t == nil:
+		a.toast.snap(0)
+	case jump:
+		a.toast.snap(100)
+	case t.id != a.toastID: // a new one slides in from the edge
+		a.toast.snap(0)
+		a.toast.target = 100
+	}
+	if m.notes.toast != nil {
+		a.toastID = m.notes.toast.id
+	}
+
 	for id := range a.bars {
 		if _, ok := m.inbox.Sync[id]; !ok {
 			delete(a.bars, id)
@@ -140,7 +155,7 @@ func (m *Model) retarget(msg tea.Msg) tea.Cmd {
 
 func (m *Model) moving() bool {
 	a := &m.anim
-	if a.side.moving() || a.panel.moving() || a.scroll.moving() || a.search.moving() {
+	if a.side.moving() || a.panel.moving() || a.scroll.moving() || a.search.moving() || a.toast.moving() {
 		return true
 	}
 	for _, b := range a.bars {
@@ -167,6 +182,7 @@ func (m Model) frame() (tea.Model, tea.Cmd) {
 	a.side.step()
 	a.panel.step()
 	a.search.step()
+	a.toast.step()
 	for _, b := range a.bars {
 		b.step()
 	}
@@ -208,6 +224,14 @@ func (m Model) barPercent(id core.PlatformID, s core.SyncEvent) int {
 	}
 	p, _ := syncPercent(s)
 	return p
+}
+
+// toastIn is how far the toast has come in, 0 to 1.
+func (m Model) toastIn() float64 {
+	if !m.anim.on {
+		return 1
+	}
+	return min(1, max(0, m.anim.toast.pos/100))
 }
 
 // searchIn is how far the search box has come in, 0 to 1.

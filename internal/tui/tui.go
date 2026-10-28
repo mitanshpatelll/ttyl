@@ -109,7 +109,8 @@ type Model struct {
 	spinning bool          // spinner ticks are running
 	spinStep int           // spinner ticks so far (the loader's running light)
 
-	anim motion // what slides and eases (anim.go)
+	anim  motion  // what slides and eases (anim.go)
+	notes notices // new messages announced (notify.go)
 
 	ready   bool      // startup is over and the chat list shows (see checkReady)
 	started time.Time // when this UI started
@@ -255,6 +256,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused, m.activeFrom = true, time.Now()
+		m.notes.pending = map[string]news{} // you're back: the list shows what's new
 		return m, nil
 
 	case tea.BlurMsg:
@@ -305,7 +307,20 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		ready := m.checkReady(time.Now())
-		return m, tea.Batch(ready, m.startSpinner())
+		return m, tea.Batch(ready, m.startSpinner(), m.notice(time.Now()))
+
+	case toastDoneMsg:
+		if m.notes.toast != nil && m.notes.toast.id == msg.id {
+			m.notes.toast = nil
+		}
+		return m, nil
+
+	case desktopFlushMsg:
+		m.notes.flushDue = false
+		return m, m.flushDesktop(time.Now())
+
+	case notifiedMsg: // a notification that didn't show is not worth interrupting for
+		return m, nil
 
 	case messagesMsg:
 		if msg.err != nil {

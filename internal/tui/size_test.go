@@ -75,6 +75,9 @@ func TestEverySize(t *testing.T) {
 	resize(m, "help")
 	m = keys(m, "x", "tab", " ", "e")
 	resize(m, "details off")
+	m.notes.toast = &toast{id: 1, chat: m.inbox.Chats[len(m.inbox.Chats)-1], more: 2}
+	resize(m, "toast")
+	m.notes.toast = nil
 
 	wa1.events <- core.SyncEvent{Platform: core.WhatsApp, Active: true, Done: 768, Total: 1234, Unit: "messages"}
 	a.Drain()

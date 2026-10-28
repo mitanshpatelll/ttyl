@@ -21,6 +21,7 @@ import (
 	"github.com/mitanshpatelll/ttyl/internal/cellwidth"
 	"github.com/mitanshpatelll/ttyl/internal/config"
 	"github.com/mitanshpatelll/ttyl/internal/core"
+	"github.com/mitanshpatelll/ttyl/internal/notify"
 	"github.com/mitanshpatelll/ttyl/internal/platform"
 	"github.com/mitanshpatelll/ttyl/internal/rules"
 	"github.com/mitanshpatelll/ttyl/internal/store"
@@ -182,7 +183,15 @@ func runChats(login core.PlatformID) error {
 	}
 	tui.SetIcons(e.cfg.UI.Icons)
 	tui.SetAnimations(e.cfg.UI.Animations)
-	p := tea.NewProgram(tui.New(a), tea.WithAltScreen(), tea.WithReportFocus(), tea.WithContext(ctx))
+	// One lock around the terminal, so a notification's escape code never lands mid-frame.
+	out := notify.NewOutput(os.Stdout)
+	var send func(title, body string) error
+	if method := notify.Pick(e.cfg.Notify.Desktop, os.Getenv); method != notify.Off {
+		send = notify.New(method, out).Send
+		e.log.Info().Str("method", string(method)).Msg("desktop notifications")
+	}
+	tui.SetNotify(send, e.cfg.Notify.Preview, e.cfg.Notify.InApp)
+	p := tea.NewProgram(tui.New(a), tea.WithAltScreen(), tea.WithReportFocus(), tea.WithContext(ctx), tea.WithOutput(out))
 	go func() {
 		for range a.Changed() {
 			p.Send(tui.RefreshMsg{})

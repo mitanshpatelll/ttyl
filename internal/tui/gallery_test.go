@@ -115,6 +115,9 @@ func gallery(t *testing.T, width, height int) {
 		shot("inbox, no chat open")
 		m = step(t, m, key("enter"))
 		shot("1:1 chat with new-messages line")
+		m.notes.toast = &toast{id: 1, chat: m.inbox.Chats[len(m.inbox.Chats)-1], more: 1}
+		shot("toast for another chat")
+		m.notes.toast = nil
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("j"))
 		m = step(t, m, key("enter"))

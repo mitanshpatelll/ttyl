@@ -122,6 +122,13 @@ func (m Model) View() string {
 	for i := range bh {
 		out = append(out, left[i]+cw.Pad(right[i], chatW)+panel[i])
 	}
+	if box := m.toastBox(); len(box) > 0 { // top right, sliding in from the edge
+		w := cw.String(box[0])
+		x := m.width - w - 1 + int(math.Round((1-m.toastIn())*float64(w+1)))
+		if shown := min(w, m.width-x); shown > 0 {
+			out = overlay(out, slideOut(box, shown), x, 1)
+		}
+	}
 	if m.focus == focusSearch {
 		box := m.searchBox()
 		drop := int(math.Round((1 - m.searchIn()) * 2)) // it comes down into place

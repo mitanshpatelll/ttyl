@@ -50,6 +50,7 @@ never the point.
 - a details panel next to the chat (`space` `e`): who it is, shared media, links, files, and who talks in a group
 - unread line, jump to first unread
 - sent / delivered / seen on your messages (✓, ✓✓, blue ✓✓), like WhatsApp; your own "seen" still stays off
+- notifications: a card in the corner when another chat gets a message; a desktop notification while ttyl is in the background (Ghostty / iTerm2 / WezTerm / kitty draw their own, else macOS). Held messages notify when delivered
 - emoji by name while typing: `:jo` lists 😂 and friends, `tab` picks, `:heart:` turns into ❤️
 - `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
 - on start, a full-screen loader with real counts until every app has caught up (`enter` skips it), so the chat list shows up complete
@@ -129,6 +130,11 @@ daily_minutes = 30             # 0 = no budget
 [ui]
 icons = true                   # Nerd Font icons · false if you see boxes
 animations = true              # sliding panels, smooth scrolling · false to turn off
+
+[notify]
+desktop = "auto"               # auto · terminal · system · off
+preview = true                 # message text in desktop notifications
+in_app = true                  # card in the corner for other chats
 
 [telegram]
 api_id = 1234567

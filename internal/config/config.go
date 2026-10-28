@@ -13,7 +13,15 @@ import (
 type Config struct {
 	Focus    Focus    `toml:"focus"`
 	UI       UI       `toml:"ui"`
+	Notify   Notify   `toml:"notify"`
 	Telegram Telegram `toml:"telegram"`
+}
+
+// Notify is how new messages in chats you aren't looking at are announced.
+type Notify struct {
+	Desktop string `toml:"desktop"` // auto, terminal, system or off (while ttyl is in the background)
+	Preview bool   `toml:"preview"` // the message text in desktop notifications, not just who
+	InApp   bool   `toml:"in_app"`  // a card inside ttyl for other chats
 }
 
 type UI struct {
@@ -62,6 +70,16 @@ icons = true
 # Panels slide and the chat scrolls smoothly. false makes everything jump into place.
 animations = true
 
+[notify]
+# New messages in chats you aren't looking at.
+# While ttyl is in the background: "auto" uses your terminal's own notifications
+# (Ghostty, iTerm2, WezTerm, kitty) or else macOS's; also "terminal", "system", "off".
+desktop = "auto"
+# Show what the message says in desktop notifications (they can show on the lock screen).
+preview = true
+# A small card in the corner of ttyl when another chat gets a message.
+in_app = true
+
 [telegram]
 # Telegram needs your own API app (free): https://my.telegram.org → API development tools.
 # Then run: ttyl login telegram
@@ -106,9 +124,15 @@ func Load(dir string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	cfg := Config{UI: UI{Icons: true, Animations: true}} // defaults for keys older config files don't have
+	// Defaults for keys older config files don't have.
+	cfg := Config{UI: UI{Icons: true, Animations: true}, Notify: Notify{Desktop: "auto", Preview: true, InApp: true}}
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
+	}
+	switch cfg.Notify.Desktop {
+	case "auto", "terminal", "system", "off":
+	default:
+		return Config{}, fmt.Errorf("%s: notify.desktop is %q, want \"auto\", \"terminal\", \"system\" or \"off\"", path, cfg.Notify.Desktop)
 	}
 	return cfg, nil
 }
