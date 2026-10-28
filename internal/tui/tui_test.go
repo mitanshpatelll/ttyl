@@ -776,3 +776,83 @@ func TestStartupWaitsForEveryApp(t *testing.T) {
 		t.Errorf("enter did not show the chats:\n%s", m.View())
 	}
 }
+
+func TestEmojiQueryAndRanking(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		name string
+		ok   bool
+	}{{":jo", "jo", true}, {"hi :Fi", "fi", true}, {":j", "", false}, {"10:30", "", false}, {"a:bc", "", false}, {"done :+1", "+1", true}, {":joy: ", "", false}} {
+		v := []rune(c.text)
+		_, name, ok := emojiQuery(v, len(v))
+		if ok != c.ok || name != c.name {
+			t.Errorf("emojiQuery(%q) = %q %v, want %q %v", c.text, name, ok, c.name, c.ok)
+		}
+	}
+	top := func(q string) string {
+		var out []string
+		for _, h := range emojiMatches(q, 3) {
+			out = append(out, h.name)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := top("joy"); !strings.HasPrefix(got, "joy,joy_cat") {
+		t.Errorf("joy: %s", got)
+	}
+	if got := top("hea"); !strings.HasPrefix(got, "heart,") {
+		t.Errorf("hea should start with the popular heart: %s", got)
+	}
+	if got := top("thumbs"); got != "thumbsup,thumbsdown" {
+		t.Errorf("thumbs: one entry per emoji, no skin tone copies: %s", got)
+	}
+}
+
+func TestEmojiWhileTyping(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: "mom", Name: "Mom"}},
+		Messages: []core.Message{{Platform: core.WhatsApp, ChatID: "mom", ID: "1", SenderID: "mom", Timestamp: time.Now(), Kind: core.KindText, Body: "hi"}}})
+	r, _ := rules.New(nil)
+	fake := &fakePlatform{}
+	m := readyNew(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, fake))
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = step(t, m, RefreshMsg{})
+	m = step(t, m, key("i")) // open and type
+	typeText := func(s string) {
+		for _, r := range s {
+			m = step(t, m, key(string(r)))
+		}
+	}
+	typeText("lol :jo")
+	if len(m.emoji) == 0 || m.emoji[0].emoji != "😂" || !strings.Contains(m.View(), "EMOJI MATCHING") {
+		t.Fatalf("no suggestions for :jo: %v\n%s", m.emoji, m.View())
+	}
+	checkFits(t, m, "emoji list")
+	m = step(t, m, key("down"))
+	m = step(t, m, key("up"))
+	m = step(t, m, key("enter")) // picks, doesn't send
+	if got := m.compose.Value(); got != "lol 😂 " || len(fake.sent) != 0 || len(m.emoji) != 0 {
+		t.Errorf("after pick: %q, sent %v", got, fake.sent)
+	}
+	typeText("so :heart:") // a finished name turns into the emoji
+	if got := m.compose.Value(); got != "lol 😂 so ❤️" {
+		t.Errorf("after :heart: = %q", got)
+	}
+	typeText(" :fi")
+	m = step(t, m, key("esc")) // closes the list, keeps typing
+	if len(m.emoji) != 0 || m.focus != focusCompose {
+		t.Errorf("esc: %d suggestions, focus %d", len(m.emoji), m.focus)
+	}
+	m = step(t, m, key("r"))
+	if len(m.emoji) == 0 {
+		t.Error("typing more should bring the list back")
+	}
+	m = step(t, m, key("esc"))
+	m = step(t, m, key("enter"))
+	if len(fake.sent) != 1 || fake.sent[0] != "lol 😂 so ❤️ :fir" {
+		t.Errorf("sent %q", fake.sent)
+	}
+}

@@ -79,7 +79,11 @@ func (m Model) chatLines(w, h int) []string {
 			lines = append(lines, "")
 		}
 	}
-	return append(lines, "", m.composer(w))
+	lines = append(lines, "")
+	if box := m.emojiBox(w, len(lines)); m.focus == focusCompose && len(box) > 0 {
+		copy(lines[len(lines)-len(box):], box) // over the newest messages, right above the input
+	}
+	return append(lines, m.composer(w))
 }
 
 // composer is the message input: one shaded line, "Message Mummy".

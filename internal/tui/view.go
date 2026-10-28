@@ -226,8 +226,10 @@ func (m Model) footer(w int) string {
 		hints = []string{"space", "then", "e", "details panel", "esc", "cancel"}
 	case m.focus == focusSearch:
 		hints = []string{"↑/↓", "choose", "enter", "open", "esc", "close", "type", "a name"}
+	case m.focus == focusCompose && len(m.emoji) > 0:
+		hints = []string{"tab", "pick", "↑/↓", "choose", "esc", "close list"}
 	case m.focus == focusCompose:
-		hints = []string{"enter", "send", "esc", "stop typing"}
+		hints = []string{"enter", "send", "esc", "stop typing", ":name", "emoji"}
 	case m.focus == focusChat:
 		hints = []string{"j/k", "select", "esc", "back", "i", "reply", "o", "open media", "/", "search", "space e", "details", "?", "help"}
 	default:
@@ -265,7 +267,7 @@ type helpSection struct {
 var helpColumns = [2][]helpSection{
 	{
 		{"Chat list", [][2]string{{"j / k", "move"}, {"enter, l", "open chat"}, {"i", "open and reply"}, {"a", "all chats / unread"}, {"g / G", "top / bottom"}, {"tab", "go to open chat"}}},
-		{"Typing", [][2]string{{"enter", "send"}, {"esc", "stop typing"}}},
+		{"Typing", [][2]string{{"enter", "send"}, {":name", "emoji, tab picks"}, {"esc", "stop typing"}}},
 	},
 	{
 		{"Chat", [][2]string{{"j / k", "select message"}, {"o", "open attachment"}, {"i, enter", "reply"}, {"d / u", "half page down / up"}, {"g / G", "oldest / newest"}, {"esc, h", "back to the list"}}},

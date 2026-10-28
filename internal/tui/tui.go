@@ -88,8 +88,11 @@ type Model struct {
 	foundSel int
 	back     focus // where esc in the search modal goes back to
 
-	compose textinput.Model
-	extend  textinput.Model // on the lock screen: type "extend" for more time
+	compose        textinput.Model
+	emoji          []emojiHit // suggestions for the ":name" being typed
+	emojiSel       int
+	emojiDismissed string          // esc hid the suggestions for this text
+	extend         textinput.Model // on the lock screen: type "extend" for more time
 
 	focused    bool      // terminal has focus; only focused time counts toward the budget
 	activeFrom time.Time // start of the focused time not yet recorded
@@ -466,9 +469,26 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSearchKey(k)
 
 	case focusCompose:
+		if len(m.emoji) > 0 { // the emoji list takes these keys while it shows
+			switch k.String() {
+			case "tab", "enter":
+				m.pickEmoji()
+				return m, nil
+			case "up", "ctrl+p":
+				m.emojiSel = (m.emojiSel - 1 + len(m.emoji)) % len(m.emoji)
+				return m, nil
+			case "down", "ctrl+n":
+				m.emojiSel = (m.emojiSel + 1) % len(m.emoji)
+				return m, nil
+			case "esc":
+				m.emoji, m.emojiDismissed = nil, m.compose.Value()
+				return m, nil
+			}
+		}
 		switch k.String() {
 		case "esc":
 			m.compose.Blur()
+			m.emoji = nil
 			m.setFocus(focusChat)
 		case "enter":
 			text := strings.TrimSpace(m.compose.Value())
@@ -479,6 +499,8 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			m.compose, cmd = m.compose.Update(k)
+			m.completeEmoji()
+			m.findEmoji()
 		}
 
 	case focusChat:

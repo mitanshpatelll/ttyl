@@ -121,6 +121,11 @@ func gallery(t *testing.T, width, height int) {
 			m = step(t, m, key(string(r)))
 		}
 		shot("group chat, typing")
+		for _, r := range " :la" {
+			m = step(t, m, key(string(r)))
+		}
+		shot("typing an emoji")
+		m = step(t, m, key("esc"))
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("esc"))
 		m = step(t, m, key("/"))

@@ -49,6 +49,7 @@ never the point.
 - Discord-style chat: who said what is obvious (colored names, avatars, "Today at 17:15")
 - a details panel next to the chat (`space` `e`): who it is, shared media, links, files, and who talks in a group
 - unread line, jump to first unread
+- emoji by name while typing: `:jo` lists 😂 and friends, `tab` picks, `:heart:` turns into ❤️
 - `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
 - on start, a full-screen loader with real counts until every app has caught up (`enter` skips it), so the chat list shows up complete
 - fits any terminal from 30×8 up: narrow windows show the list or the chat, one at a time; very wide ones keep lines readable
