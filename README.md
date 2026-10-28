@@ -63,16 +63,34 @@ never the point.
 
 ## install
 
-You need **Go 1.26+** and **Xcode Command Line Tools** (`xcode-select --install`). Built and
-tested on macOS.
+Ready-made builds for **macOS** (Apple Silicon and Intel) and **Linux** (x86_64 and ARM).
+No Go, no cloning.
+
+**Homebrew**
+
+```sh
+brew tap mitanshpatelll/ttyl https://github.com/mitanshpatelll/ttyl
+brew install mitanshpatelll/ttyl/ttyl
+```
+
+`brew upgrade ttyl` gets new versions.
+
+**One line** (puts `ttyl` in `/usr/local/bin`, or `~/.local/bin`, after checking its checksum)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mitanshpatelll/ttyl/main/install.sh | sh
+```
+
+Or grab the archive for your system from [releases](https://github.com/mitanshpatelll/ttyl/releases).
+On Linux ttyl keeps its keys in your desktop's keyring (GNOME Keyring, KWallet), so it needs one running.
+
+**From source** (Go 1.26+, and Xcode Command Line Tools on macOS):
 
 ```sh
 git clone https://github.com/mitanshpatelll/ttyl
 cd ttyl
 make install        # puts `ttyl` in your $GOBIN
 ```
-
-The first build takes a while (Telegram and Instagram libraries are big). After that it's quick.
 
 ## get going
 

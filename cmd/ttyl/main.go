@@ -41,7 +41,7 @@ Usage:
   ttyl version
 
 Platforms: whatsapp (wa), telegram (tg), instagram (ig)
-Data and config: ~/Library/Application Support/ttyl (or $TTYL_HOME)
+Data and config: ~/Library/Application Support/ttyl on macOS, ~/.config/ttyl on Linux (or $TTYL_HOME)
 `
 
 func main() {

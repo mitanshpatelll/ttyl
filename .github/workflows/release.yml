@@ -1,0 +1,90 @@
+# Pushing a tag like v0.9.0 builds ttyl for macOS and Linux, publishes a GitHub release with
+# the archives and their checksums, and points the Homebrew formula at them.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-latest, goos: darwin, goarch: arm64, test: true }
+          - { runner: macos-latest, goos: darwin, goarch: amd64, cc: "clang -arch x86_64" }
+          # Linux builds on the oldest supported Ubuntu, so the binary runs on older glibc too.
+          - { runner: ubuntu-22.04, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-22.04-arm, goos: linux, goarch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        if: matrix.test
+        run: go vet ./... && go test ./...
+      - name: Build
+        env:
+          CGO_ENABLED: "1" # SQLite
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc || 'cc' }}
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="ttyl_${version}_${GOOS}_${GOARCH}"
+          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "pkg/${name}/ttyl" ./cmd/ttyl
+          cp LICENSE README.md "pkg/${name}/"
+          tar -C pkg -czf "${name}.tar.gz" "${name}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ttyl-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: "*.tar.gz"
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist && sha256sum *.tar.gz > checksums.txt && cd ..
+          cat > notes.md <<NOTES
+          ## Install
+
+          macOS or Linux, either way:
+
+          \`\`\`sh
+          brew tap mitanshpatelll/ttyl https://github.com/mitanshpatelll/ttyl
+          brew install mitanshpatelll/ttyl/ttyl
+          \`\`\`
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/mitanshpatelll/ttyl/main/install.sh | sh
+          \`\`\`
+
+          Or download the archive for your system below, check it against \`checksums.txt\`, and put \`ttyl\` on your PATH.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/checksums.txt \
+            --title "ttyl $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
+      - name: Point the Homebrew formula at this release
+        run: |
+          scripts/formula.sh "${GITHUB_REF_NAME#v}" dist/checksums.txt > Formula/ttyl.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/ttyl.rb
+          git commit -m "Homebrew formula for $GITHUB_REF_NAME"
+          git push origin HEAD:main
