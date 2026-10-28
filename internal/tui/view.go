@@ -19,8 +19,41 @@ var platformNames = map[core.PlatformID]string{core.WhatsApp: "WhatsApp", core.T
 
 // Layout, Discord style: a shaded sidebar on the left, the conversation on the right, no
 // boxes. Row 0 is the top bar, row 1 headings and a rule, then the body, then key hints.
-func (m Model) leftW() int  { return min(max(m.width*34/100, 34), 48) }
-func (m Model) rightW() int { return max(20, m.width-m.leftW()) }
+// Narrower than twoPaneW, the list and the chat take turns on the whole screen, like the
+// phone apps; smaller than minW×minH, ttyl asks for a bigger window.
+const (
+	minW, minH = 30, 8
+	twoPaneW   = 72
+)
+
+func (m Model) tooSmall() bool { return m.width < minW || m.height < minH }
+func (m Model) twoPane() bool  { return m.width >= twoPaneW }
+
+// chatShown: with one pane, the chat has the screen while it (or a search opened from it) has focus.
+func (m Model) chatShown() bool {
+	if m.twoPane() {
+		return true
+	}
+	f := m.focus
+	if f == focusSearch {
+		f = m.back
+	}
+	return m.open != nil && (f == focusChat || f == focusCompose)
+}
+
+// leftW is the chat list's width: a share of the screen, all of it, or none while the chat
+// has the single pane.
+func (m Model) leftW() int {
+	switch {
+	case m.twoPane():
+		return min(max(m.width*34/100, 32), 48)
+	case m.chatShown():
+		return 0
+	}
+	return m.width
+}
+
+func (m Model) rightW() int { return m.width - m.leftW() }
 func (m Model) bodyH() int  { return max(3, m.height-3) } // minus top bar, headings, key hints
 
 // rows is how many inbox entries fit: a top gap, then two lines and a spacer per chat.
@@ -43,6 +76,9 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return ""
 	}
+	if m.tooSmall() {
+		return m.viewTooSmall()
+	}
 	if m.inbox.Locked() {
 		return m.viewLocked()
 	}
@@ -51,15 +87,24 @@ func (m Model) View() string {
 	}
 	lw, rw, bh := m.leftW(), m.rightW(), m.bodyH()
 	chatW, dw := m.chatW(), m.detailsW()
-	left, right := m.inboxLines(lw, bh), m.chatLines(chatW, bh)
-	panel, panelHead := make([]string, bh), ""
+	left, right, panel := make([]string, bh), make([]string, bh), make([]string, bh)
+	top, heading := "", ""
+	if lw > 0 {
+		left = m.inboxLines(lw, bh)
+		top, heading = m.sidebarTop(lw), m.inboxHeader(lw)
+	}
+	if rw > 0 {
+		right = m.chatLines(chatW, bh)
+		top += cw.Pad(m.chatHeader(rw), rw)
+		heading += dimStyle.Render(strings.Repeat("─", chatW))
+	}
 	if dw > 0 {
-		panel, panelHead = m.detailsLines(dw, bh), m.detailsHeading(dw)
+		panel = m.detailsLines(dw, bh)
+		heading += m.detailsHeading(dw)
 	}
 
 	out := make([]string, 0, m.height)
-	out = append(out, m.sidebarTop(lw)+cw.Pad(m.chatHeader(rw), rw))
-	out = append(out, m.inboxHeader(lw)+dimStyle.Render(strings.Repeat("─", chatW))+panelHead)
+	out = append(out, top, heading)
 	for i := range bh {
 		out = append(out, left[i]+cw.Pad(right[i], chatW)+panel[i])
 	}
@@ -111,8 +156,37 @@ func statusText(id core.PlatformID, s core.StatusEvent, bg lipgloss.TerminalColo
 	return style(yellow).Render(dot) + style(faint).Render(" "+name+" ") + style(yellow).Render(detail)
 }
 
+// viewTooSmall asks for a bigger window instead of drawing a broken layout.
+func (m Model) viewTooSmall() string {
+	lines := []string{accentStyle.Bold(true).Render("ttyl"), dimStyle.Render("window too small"),
+		dimStyle.Render(fmt.Sprintf("%d×%d, need %d×%d", m.width, m.height, minW, minH))}
+	out := make([]string, m.height)
+	start := max(0, (m.height-len(lines))/2)
+	for i := range out {
+		l := ""
+		if j := i - start; j >= 0 && j < len(lines) {
+			l = cw.Truncate(lines[j], m.width, "")
+		}
+		out[i] = cw.Center(l, m.width)
+	}
+	return strings.Join(out, "\n")
+}
+
 // statusRight is only what differs from normal: held messages, the budget, receipts on.
-func (m Model) statusRight() string {
+// The least important parts go first when there are only room cells.
+func (m Model) statusRight(room int) string {
+	parts := m.statusParts()
+	for len(parts) > 0 {
+		s := strings.Join(parts, dimStyle.Render("  ·  ")) + " "
+		if cw.String(s) <= room {
+			return s
+		}
+		parts = parts[:len(parts)-1]
+	}
+	return ""
+}
+
+func (m Model) statusParts() []string {
 	var parts []string
 	if !m.inbox.Next.IsZero() {
 		if m.inbox.Held > 0 {
@@ -132,10 +206,7 @@ func (m Model) statusRight() string {
 	if m.inbox.Receipts {
 		parts = append(parts, lipgloss.NewStyle().Foreground(yellow).Render("read receipts on"))
 	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, dimStyle.Render("  ·  ")) + " "
+	return parts
 }
 
 func minutes(d time.Duration) string {
@@ -146,24 +217,40 @@ func minutes(d time.Duration) string {
 }
 
 func (m Model) footer(w int) string {
-	var hints string
+	var hints []string
 	switch {
 	case m.leader:
-		hints = keyHints("space", "then", "e", "details panel", "esc", "cancel")
+		hints = []string{"space", "then", "e", "details panel", "esc", "cancel"}
 	case m.focus == focusSearch:
-		hints = keyHints("type", "a name", "↑/↓", "choose", "enter", "open", "esc", "close")
+		hints = []string{"↑/↓", "choose", "enter", "open", "esc", "close", "type", "a name"}
 	case m.focus == focusCompose:
-		hints = keyHints("enter", "send", "esc", "stop typing")
+		hints = []string{"enter", "send", "esc", "stop typing"}
 	case m.focus == focusChat:
-		hints = keyHints("j/k", "select", "o", "open media", "i", "reply", "/", "search", "space e", "details", "esc", "back", "?", "help")
+		hints = []string{"j/k", "select", "esc", "back", "i", "reply", "o", "open media", "/", "search", "space e", "details", "?", "help"}
 	default:
-		hints = keyHints("j/k", "move", "enter", "open", "/", "search", "a", "all chats", "space e", "details", "?", "help", "q", "quit")
+		hints = []string{"j/k", "move", "enter", "open", "/", "search", "a", "all chats", "space e", "details", "?", "help", "q", "quit"}
 	}
 	status := errorStyle.Render(m.flash)
 	if m.flash == "" {
 		status = accentStyle.Render(m.note)
 	}
-	return spread(" "+hints, status+" ", w)
+	return spread(" "+fitHints(w-cw.String(status)-3, hints...), status+" ", w)
+}
+
+// fitHints drops key hints from the end until they fit in w cells. "?" stays as long as
+// anything does: it leads to all the others.
+func fitHints(w int, pairs ...string) string {
+	for {
+		s := keyHints(pairs...)
+		if cw.String(s) <= w || len(pairs) <= 2 {
+			return s
+		}
+		i := len(pairs) - 2
+		if pairs[i] == "?" {
+			i -= 2
+		}
+		pairs = append(pairs[:i:i], pairs[i+2:]...)
+	}
 }
 
 type helpSection struct {
@@ -183,49 +270,91 @@ var helpColumns = [2][]helpSection{
 	},
 }
 
-func (m Model) viewHelp() string {
+// helpLines are the help body: two columns side by side when they fit, else one.
+func (m Model) helpLines() (lines []string, w int) {
 	const colW = 36
-	var cols [2][]string
-	for i, sections := range helpColumns {
+	render := func(sections []helpSection) []string {
+		var col []string
 		for _, sec := range sections {
-			cols[i] = append(cols[i], "", " "+accentStyle.Bold(true).Render(sec.title))
+			col = append(col, "", " "+accentStyle.Bold(true).Render(sec.title))
 			for _, k := range sec.keys {
-				cols[i] = append(cols[i], "   "+keyStyle.Render(fmt.Sprintf("%-9s", k[0]))+" "+dimStyle.Render(k[1]))
+				col = append(col, "   "+keyStyle.Render(fmt.Sprintf("%-9s", k[0]))+" "+dimStyle.Render(k[1]))
 			}
 		}
+		return col
 	}
-	var body []string
-	for i := range max(len(cols[0]), len(cols[1])) {
-		var l, r string
-		if i < len(cols[0]) {
-			l = cols[0][i]
+	left, right := render(helpColumns[0]), render(helpColumns[1])
+	w = 2*colW + 2
+	if m.width < w+2 { // one column
+		lines, w = append(left, right...), min(colW+4, m.width)
+	} else {
+		for i := range max(len(left), len(right)) {
+			var l, r string
+			if i < len(left) {
+				l = left[i]
+			}
+			if i < len(right) {
+				r = right[i]
+			}
+			lines = append(lines, cw.Pad(l, colW)+r)
 		}
-		if i < len(cols[1]) {
-			r = cols[1][i]
-		}
-		body = append(body, cw.Pad(l, colW)+r)
 	}
-	body = append(body, "", " "+dimStyle.Render("any key closes · run ttyl stats for your week"))
-	return m.centered(panel("Keys", "", body, 2*colW+2, len(body)+3, true, -1))
+	end := "any key closes · run ttyl stats for your week"
+	if w < 50 {
+		end = "any key closes"
+	}
+	lines = append(lines, "", " "+dimStyle.Render(end))
+	for i, l := range lines {
+		lines[i] = cw.Truncate(l, w-2, "…")
+	}
+	return lines, w
+}
+
+// helpRows is how many help lines fit on screen at once; fewer than all means j/k scroll.
+func (m Model) helpRows() (shown, total int) {
+	lines, _ := m.helpLines()
+	return min(len(lines), max(1, m.height-4)), len(lines) // border, title row, a line of air
+}
+
+func (m Model) viewHelp() string {
+	lines, w := m.helpLines()
+	shown, total := m.helpRows()
+	off := min(m.helpOff, total-shown)
+	right := ""
+	if shown < total {
+		right = dimStyle.Render(fmt.Sprintf("j/k  %d/%d", off+shown, total))
+	}
+	return m.centered(panel("Keys", right, lines[off:off+shown], w, shown+3, true, -1))
 }
 
 func (m Model) viewLocked() string {
-	body := []string{
-		"",
-		"  " + boldStyle.Render("Today's ttyl time is used up"),
-		"",
-		"  " + fmt.Sprintf("You spent %s here today, budget %s.", minutes(m.inbox.Used), minutes(m.inbox.Limit)),
-		"  " + "Messages keep arriving; they'll be here tomorrow.",
-		"",
-		"  " + keyHints("q", "quit", "e", "5 more minutes (counted in ttyl stats)"),
+	w := min(60, m.width)
+	text := func(style lipgloss.Style, s string) []string {
+		var out []string
+		for _, l := range cw.Wrap(s, w-6) {
+			out = append(out, "  "+style.Render(l))
+		}
+		return out
+	}
+	body := []string{""}
+	body = append(body, text(boldStyle, "Today's ttyl time is used up")...)
+	body = append(body, "")
+	body = append(body, text(lipgloss.NewStyle(), fmt.Sprintf("You spent %s here today, budget %s.", minutes(m.inbox.Used), minutes(m.inbox.Limit)))...)
+	body = append(body, text(lipgloss.NewStyle(), "Messages keep arriving; they'll be here tomorrow.")...)
+	body = append(body, "")
+	if hints := keyHints("q", "quit", "e", "5 more minutes (counted in ttyl stats)"); cw.String(hints) <= w-6 {
+		body = append(body, "  "+hints)
+	} else {
+		body = append(body, "  "+keyHints("q", "quit"), "  "+keyHints("e", "5 more minutes"))
 	}
 	if m.extend.Focused() {
 		body = append(body, "", "  "+m.extend.View())
 	}
 	if m.flash != "" {
-		body = append(body, "", "  "+errorStyle.Render(m.flash))
+		body = append(body, "")
+		body = append(body, text(errorStyle, m.flash)...)
 	}
-	return m.centered(panel("Time's up", "", body, 60, len(body)+3, true, -1))
+	return m.centered(panel("Time's up", "", body, w, min(len(body)+3, m.height), true, -1))
 }
 
 // panel draws a rounded box of w×h cells with the title set into the top border (popups only).

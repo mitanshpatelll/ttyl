@@ -94,8 +94,9 @@ type Model struct {
 	focused    bool      // terminal has focus; only focused time counts toward the budget
 	activeFrom time.Time // start of the focused time not yet recorded
 
-	help   bool // ? overlay
-	leader bool // space was pressed: the next key is a command (e: details)
+	help    bool // ? overlay
+	helpOff int  // first help line shown, when it doesn't all fit
+	leader  bool // space was pressed: the next key is a command (e: details)
 
 	showDetails bool        // details panel next to the chat
 	det         app.Details // for the chat in detKey
@@ -111,7 +112,6 @@ type Model struct {
 func New(a *app.App) Model {
 	search := textinput.New()
 	search.Prompt = ""
-	search.Placeholder = "Who do you want to talk to?"
 	search.TextStyle = lipgloss.NewStyle().Foreground(text)
 	search.PlaceholderStyle = lipgloss.NewStyle().Foreground(faint)
 	compose := textinput.New()
@@ -405,8 +405,23 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLockedKey(k)
 	}
 	typing := m.focus == focusCompose || m.focus == focusSearch
-	if m.help || (k.String() == "?" && !typing) {
-		m.help = !m.help && k.String() == "?" // any key closes it
+	if m.help {
+		// j/k scroll a help taller than the window; any other key closes it.
+		if shown, total := m.helpRows(); shown < total {
+			switch k.String() {
+			case "j", "down":
+				m.helpOff = min(m.helpOff+1, total-shown)
+				return m, nil
+			case "k", "up":
+				m.helpOff = max(m.helpOff-1, 0)
+				return m, nil
+			}
+		}
+		m.help = false
+		return m, nil
+	}
+	if k.String() == "?" && !typing {
+		m.help, m.helpOff = true, 0
 		return m, nil
 	}
 	var cmd tea.Cmd
@@ -522,9 +537,15 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// setFocus switches panes; the chat re-renders because the selection marker only shows when it has focus.
+// setFocus switches panes; the chat re-renders because the selection marker only shows when
+// it has focus. With one pane the chat and the list swap places, so the sizes change too.
 func (m *Model) setFocus(f focus) {
+	before := m.chatW()
 	m.focus = f
+	if m.chatW() != before {
+		m.layout()
+		return
+	}
 	m.renderChat()
 }
 
@@ -658,7 +679,12 @@ func (m *Model) layout() {
 	m.chatView.Width = w
 	m.chatView.Height = max(1, m.bodyH()-composerH)
 	m.compose.Width = max(1, w-9)
-	m.search.Width = max(1, m.searchW()-26) // room for the icon and the "WhatsApp only" chip
+	chip := 20 // room for the icon and the "WhatsApp only" chip
+	m.search.Placeholder = "Who do you want to talk to?"
+	if m.searchNarrow() {
+		chip, m.search.Placeholder = 12, "Find a chat"
+	}
+	m.search.Width = max(4, m.searchW()-6-chip)
 	m.renderChat()
 	m.showSelected()
 	m.scrollInbox()

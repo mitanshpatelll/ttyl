@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,13 +15,14 @@ import (
 const (
 	composerH = 2               // a spacer and the message input
 	textCol   = 8               // message text starts here: edge, space, avatar (4), two spaces
+	maxTextW  = 100             // on very wide screens lines stop here, so they stay easy to read
 	groupGap  = 7 * time.Minute // messages from one person closer than this share a header
 )
 
 // chatHeader: name, platform and what matters about the chat, then the unusual state.
 func (m Model) chatHeader(w int) string {
 	if m.open == nil {
-		return spread(" "+dimStyle.Render("no chat open"), m.statusRight(), w)
+		return spread(" "+dimStyle.Render("no chat open"), m.statusRight(w-16), w)
 	}
 	style := boldStyle
 	if m.focus == focusChat || m.focus == focusCompose {
@@ -46,7 +48,9 @@ func (m Model) chatHeader(w int) string {
 	if len(details) > 0 {
 		head += dimStyle.Render(" · " + strings.Join(details, " · "))
 	}
-	return spread(head, m.statusRight(), w)
+	// The status gives way before the name does.
+	name := cw.String(" " + lead + m.open.Title())
+	return spread(head, m.statusRight(w-min(name, 24)-2), w)
 }
 
 // phone formats a WhatsApp chat ID for reading: "919825011420@s.whatsapp.net" → "+91 98250 11420".
@@ -83,11 +87,14 @@ func (m Model) composer(w int) string {
 	bg := on(inputBg)
 	inner := w - 4
 	var content string
-	if m.focus == focusCompose {
+	switch {
+	case m.focus == focusCompose:
 		content = bg(accentStyle).Render("› ") + m.compose.View()
-	} else {
-		content = bg(dimStyle).Render("Message "+cw.Truncate(m.open.Title(), max(4, inner-30), "…")+"   ·   press ") +
+	case inner >= 40:
+		content = bg(dimStyle).Render("Message "+cw.Truncate(m.open.Title(), inner-30, "…")+"   ·   press ") +
 			bg(keyStyle).Render("i") + bg(dimStyle).Render(" to type")
+	default: // the footer says how
+		content = bg(dimStyle).Render("Message " + cw.Truncate(m.open.Title(), max(4, inner-10), "…"))
 	}
 	return "  " + bg(lipgloss.NewStyle()).Render(" ") + fill(content, inner-1, inputBg) + "  "
 }
@@ -123,21 +130,27 @@ func (m Model) viewNoChat(w, h int) []string {
 	for _, p := range platformOrder {
 		apps = append(apps, keyStyle.Render(strings.ToLower(platformTags[p][:1])+":")+" "+platformTag(p))
 	}
-	block := []string{
-		accentStyle.Bold(true).Render("ttyl"),
-		"",
-		summary,
-		"",
+	// The whole card when it fits; on a short window the rules go, then the keys.
+	head := []string{accentStyle.Bold(true).Render("ttyl"), "", summary}
+	keys := []string{"",
 		keyStyle.Render("/") + dimStyle.Render(" search anyone, or one app with"),
 		"  " + strings.Join(apps, "   "),
 		keyStyle.Render("j/k") + dimStyle.Render(" move  ") + keyStyle.Render("enter") + dimStyle.Render(" open  ") + keyStyle.Render("a") + dimStyle.Render(" all chats"),
-		"",
+	}
+	rules := []string{"",
 		dimStyle.Render("Delivery       ") + delivery,
 		dimStyle.Render("Read receipts  ") + receipts,
 		dimStyle.Render("Feeds          ") + "never shown",
 	}
-	if m.syncing() {
+	block := slices.Concat(head, keys, rules)
+	switch {
+	case m.syncing():
 		block = m.syncCard(w)
+	case len(block) > h:
+		block = slices.Concat(head, keys)
+		if len(block) > h {
+			block = head[2:]
+		}
 	}
 	// Left-aligned lines, centered as one block, so the labels line up.
 	blockW := 0
@@ -149,7 +162,7 @@ func (m Model) viewNoChat(w, h int) []string {
 		lines = append(lines, "")
 	}
 	for _, l := range block {
-		lines = append(lines, cw.Center(cw.Pad(l, blockW), w))
+		lines = append(lines, cw.Center(cw.Pad(cw.Truncate(l, w-2, "…"), min(blockW, w-2)), w))
 	}
 	for len(lines) < h {
 		lines = append(lines, "")
@@ -260,7 +273,7 @@ func (m *Model) message(msg core.Message, w int, header, selected bool, now time
 	}
 
 	tag := mediaTag(msg)
-	body := cw.Wrap(strings.TrimSpace(tag+" "+msg.Body), max(10, w-textCol-2))
+	body := cw.Wrap(strings.TrimSpace(tag+" "+msg.Body), max(10, min(w-textCol-2, maxTextW)))
 	textStyle := lipgloss.NewStyle().Foreground(text)
 	for i, l := range body {
 		styled := textStyle.Render(l)

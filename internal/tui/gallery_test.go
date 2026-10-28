@@ -28,17 +28,24 @@ func TestGallery(t *testing.T) {
 		lipgloss.SetColorProfile(termenv.TrueColor)
 		lipgloss.SetHasDarkBackground(mode == "dark")
 	}
-	for _, size := range [][2]int{{170, 44}, {110, 32}, {80, 24}} {
+	sizes := [][2]int{{170, 44}, {110, 32}, {80, 24}, {60, 20}, {40, 12}, {120, 14}, {220, 56}}
+	if only := os.Getenv("TTYL_GALLERY_SIZE"); only != "" { // e.g. 60x20
+		var w, h int
+		fmt.Sscanf(only, "%dx%d", &w, &h)
+		sizes = [][2]int{{w, h}}
+	}
+	for _, size := range sizes {
 		gallery(t, size[0], size[1])
 	}
 }
 
-func gallery(t *testing.T, width, height int) {
+// galleryApp is a store with a few chats that are hard to draw: long names, Gujarati, emoji,
+// groups, a reel, a voice note; two platforms online and a 30 minute budget.
+func galleryApp(t *testing.T) (*app.App, *onlinePlatform, *onlinePlatform) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
 	now := time.Now()
 	ago := func(min int) time.Time { return now.Add(-time.Duration(min) * time.Minute) }
 	wa, tg := core.WhatsApp, core.Telegram
@@ -87,6 +94,13 @@ func gallery(t *testing.T, width, height int) {
 		p.events <- core.StatusEvent{Platform: p.id, State: core.StateConnected}
 	}
 	a.Drain() // both show as online
+	t.Cleanup(func() { st.Close() })
+	return a, wa1, tg1
+}
+
+func gallery(t *testing.T, width, height int) {
+	a, wa1, tg1 := galleryApp(t)
+	wa, tg := core.WhatsApp, core.Telegram
 	{
 		size := [2]int{width, height}
 		m := New(a)

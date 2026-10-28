@@ -51,6 +51,7 @@ never the point.
 - unread line, jump to first unread
 - `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
 - loader with real counts when you come back to a big backlog
+- fits any terminal from 30×8 up: narrow windows show the list or the chat, one at a time; very wide ones keep lines readable
 - Nerd Font icons (JetBrainsMono Nerd Font etc.), with a plain-text fallback
 - edits, unsends and reactions show up; media downloads only when you press `o`
 - Gujarati, Hindi and emoji render correctly: ttyl measures how *your* terminal draws text at startup

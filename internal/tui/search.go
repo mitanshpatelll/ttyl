@@ -144,17 +144,33 @@ func (m Model) searchW() int {
 	return m.width
 }
 
-func (m Model) searchRows() int { return min(searchRowsMax, max(1, m.height-12)) }
+// searchRows is how many results the modal lists, and whether there is room for air around
+// the query and the app prefixes underneath (10 lines of frame) or only the essentials (5).
+func (m Model) searchRows() (rows int, roomy bool) {
+	room := m.height - 3 // the footer and a line above and below stay visible
+	if room-10 >= 3 {
+		return min(searchRowsMax, room-10), true
+	}
+	return max(1, min(searchRowsMax, room-5)), false
+}
+
+// searchNarrow: app names shrink to their tags ("WA") in a narrow modal.
+func (m Model) searchNarrow() bool { return m.searchW() < 60 }
 
 // searchBox draws the modal: the query, the matching chats and the app prefixes.
 func (m Model) searchBox() []string {
-	w, rows := m.searchW(), m.searchRows()
+	w := m.searchW()
+	rows, roomy := m.searchRows()
 	iw := w - 2
 	platform, q := searchQuery(m.search.Value())
 
 	input := " " + accentStyle.Render(iconSearch.sp()) + m.search.View()
 	if platform != "" {
-		chip := lipgloss.NewStyle().Foreground(platformColors[platform]).Bold(true).Render(platformIcons[platform].sp() + platformNames[platform] + " only")
+		name := platformNames[platform]
+		if m.searchNarrow() {
+			name = platformTags[platform]
+		}
+		chip := lipgloss.NewStyle().Foreground(platformColors[platform]).Bold(true).Render(platformIcons[platform].sp() + name + " only")
 		input = spread(input, chip+" ", iw)
 	}
 
@@ -169,8 +185,11 @@ func (m Model) searchBox() []string {
 	if len(m.found) > 0 {
 		pos = dimStyle.Render(fmt.Sprintf("%d/%d", m.foundSel+1, len(m.found)))
 	}
-	// Line 3 becomes the rule under the query.
-	body := []string{"", input, "", "", "", spread(" "+dimStyle.Bold(true).Render(label), pos+" ", iw)}
+	heading := spread(" "+dimStyle.Bold(true).Render(label), pos+" ", iw)
+	body, rule := []string{input, "", heading}, 1 // the line at index rule becomes the rule under the query
+	if roomy {
+		body, rule = []string{"", input, "", "", "", heading}, 3
+	}
 
 	var results []string
 	if len(m.found) == 0 {
@@ -184,7 +203,10 @@ func (m Model) searchBox() []string {
 				msg = "No " + platformNames[platform] + " chat matches “" + q + "”"
 			}
 		}
-		results = append(results, "", dimStyle.Render(cw.Center(cw.Truncate(msg, iw-2, "…"), iw)))
+		if rows > 1 {
+			results = append(results, "")
+		}
+		results = append(results, dimStyle.Render(cw.Center(cw.Truncate(msg, iw-2, "…"), iw)))
 	}
 	first := max(0, m.foundSel-rows+1)
 	for i := first; i < len(m.found) && i < first+rows; i++ {
@@ -195,12 +217,19 @@ func (m Model) searchBox() []string {
 	}
 	body = append(body, results...)
 
-	prefixes := []string{}
-	for _, p := range platformOrder {
-		prefixes = append(prefixes, keyStyle.Render(strings.ToLower(platformTags[p][:1])+":")+" "+dimStyle.Render(platformNames[p]))
+	if roomy {
+		var prefixes []string
+		for _, p := range platformOrder {
+			name := platformNames[p]
+			if m.searchNarrow() {
+				name = platformTags[p]
+			}
+			prefixes = append(prefixes, keyStyle.Render(strings.ToLower(platformTags[p][:1])+":")+" "+dimStyle.Render(name))
+		}
+		hint := " " + strings.Join(prefixes, "   ") + dimStyle.Render("   one app only")
+		body = append(body, "", cw.Truncate(hint, iw, ""))
 	}
-	body = append(body, "", " "+strings.Join(prefixes, "   ")+dimStyle.Render("   one app only"))
-	return strings.Split(panel("Search", dimStyle.Render("esc to close"), body, w, len(body)+2, true, 3), "\n")
+	return strings.Split(panel("Search", dimStyle.Render("esc to close"), body, w, len(body)+2, true, rule), "\n")
 }
 
 // searchRow is one result: avatar, name with the match underlined, the last message if there

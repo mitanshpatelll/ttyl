@@ -20,6 +20,7 @@ import (
 const (
 	detailsPref    = "details" // "off" when hidden
 	minDetailsW    = 28
+	maxDetailsW    = 56
 	minChatWithPan = 44 // narrower than this, the chat wins and the panel stays hidden
 )
 
@@ -31,11 +32,19 @@ type detailsMsg struct {
 
 // detailsW is the panel width, 0 when it is hidden or there is no room.
 func (m Model) detailsW() int {
-	if !m.showDetails || m.open == nil {
+	if !m.showDetails {
+		return 0
+	}
+	return m.detailsRoom()
+}
+
+// detailsRoom is how wide the panel can be next to the open chat, 0 when there is no room.
+func (m Model) detailsRoom() int {
+	if m.open == nil {
 		return 0
 	}
 	rw := m.rightW()
-	dw := max(minDetailsW, rw*30/100)
+	dw := min(max(minDetailsW, rw*30/100), maxDetailsW)
 	if rw-dw < minChatWithPan {
 		return 0
 	}
@@ -58,13 +67,14 @@ func (m Model) loadDetails() tea.Cmd {
 
 // toggleDetails shows or hides the panel and remembers the choice.
 func (m *Model) toggleDetails() tea.Cmd {
+	if m.open != nil && m.detailsRoom() == 0 { // leave the saved choice alone
+		m.note = "window too narrow for details"
+		return nil
+	}
 	m.showDetails = !m.showDetails
 	m.layout()
-	switch {
-	case m.showDetails && m.open == nil:
+	if m.showDetails && m.open == nil {
 		m.note = "details show when a chat is open"
-	case m.showDetails && m.detailsW() == 0:
-		m.note = "window too narrow for details"
 	}
 	value := "on"
 	if !m.showDetails {
