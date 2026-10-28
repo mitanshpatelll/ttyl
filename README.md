@@ -53,6 +53,7 @@ never the point.
 - emoji by name while typing: `:jo` lists 😂 and friends, `tab` picks, `:heart:` turns into ❤️
 - `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
 - on start, a full-screen loader with real counts until every app has caught up (`enter` skips it), so the chat list shows up complete
+- smooth: the details panel and the chat list slide, the chat scrolls instead of jumping, search drops in (`animations = false` to turn off)
 - fits any terminal from 30×8 up: narrow windows show the list or the chat, one at a time; very wide ones keep lines readable
 - Nerd Font icons (JetBrainsMono Nerd Font etc.), with a plain-text fallback
 - edits, unsends and reactions show up; media downloads only when you press `o`
@@ -127,6 +128,7 @@ daily_minutes = 30             # 0 = no budget
 
 [ui]
 icons = true                   # Nerd Font icons · false if you see boxes
+animations = true              # sliding panels, smooth scrolling · false to turn off
 
 [telegram]
 api_id = 1234567

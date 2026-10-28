@@ -170,11 +170,21 @@ func commas(n int) string {
 	return s
 }
 
-// progressBar fills w cells in proportion to how far s is.
-func progressBar(s core.SyncEvent, w int) string {
-	p, _ := syncPercent(s)
-	full := p * w / 100
-	return accentStyle.Render(strings.Repeat("━", full)) + lipgloss.NewStyle().Foreground(subtle).Render(strings.Repeat("─", w-full))
+// progressBar fills w cells to p percent. While the size is unknown a short light runs
+// along it instead, one cell per spinner step.
+func progressBar(p int, known bool, step, w int) string {
+	empty := lipgloss.NewStyle().Foreground(subtle)
+	if !known {
+		if !useAnimations {
+			return empty.Render(strings.Repeat("─", w))
+		}
+		seg := min(4, w)
+		at := step%(w+seg) - seg // from just before the bar to its end
+		lo, hi := max(0, at), min(w, at+seg)
+		return empty.Render(strings.Repeat("─", lo)) + accentStyle.Render(strings.Repeat("━", hi-lo)) + empty.Render(strings.Repeat("─", w-hi))
+	}
+	full := min(w, max(0, p)) * w / 100
+	return accentStyle.Render(strings.Repeat("━", full)) + empty.Render(strings.Repeat("─", w-full))
 }
 
 // progressRows is a line per app: its name, a bar and how far it is. With all, every
@@ -193,7 +203,9 @@ func (m Model) progressRows(w int, all bool) []string {
 		s, syncing := m.inbox.Sync[id]
 		switch {
 		case syncing:
-			rows = append(rows, row{id, func(n int) string { return progressBar(s, n) }, dimStyle.Render(syncLabel(s))})
+			_, known := syncPercent(s)
+			p := m.barPercent(id, s)
+			rows = append(rows, row{id, func(n int) string { return progressBar(p, known, m.spinStep, n) }, dimStyle.Render(syncLabel(s))})
 		case !all || !linked:
 		case st.State == core.StateConnected:
 			full := func(n int) string { return lipgloss.NewStyle().Foreground(green).Render(strings.Repeat("━", n)) }

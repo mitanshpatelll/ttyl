@@ -229,7 +229,8 @@ func (m Model) searchBox() []string {
 		hint := " " + strings.Join(prefixes, "   ") + dimStyle.Render("   one app only")
 		body = append(body, "", cw.Truncate(hint, iw, ""))
 	}
-	return strings.Split(panel("Search", dimStyle.Render("esc to close"), body, w, len(body)+2, true, rule), "\n")
+	border := blend(subtle, accent, m.searchIn())
+	return strings.Split(panelColor(border, "Search", dimStyle.Render("esc to close"), body, w, len(body)+2, rule), "\n")
 }
 
 // searchRow is one result: avatar, name with the match underlined, the last message if there

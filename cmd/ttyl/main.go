@@ -181,6 +181,7 @@ func runChats(login core.PlatformID) error {
 		e.log.Info().Interface("probe", widths).Interface("model", model).Msg("terminal widths")
 	}
 	tui.SetIcons(e.cfg.UI.Icons)
+	tui.SetAnimations(e.cfg.UI.Animations)
 	p := tea.NewProgram(tui.New(a), tea.WithAltScreen(), tea.WithReportFocus(), tea.WithContext(ctx))
 	go func() {
 		for range a.Changed() {

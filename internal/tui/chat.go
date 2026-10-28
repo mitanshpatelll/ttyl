@@ -72,7 +72,8 @@ func (m Model) chatLines(w, h int) []string {
 	}
 	vh := h - composerH
 	lines := make([]string, 0, h)
-	for i := m.chatView.YOffset; i < m.chatView.YOffset+vh; i++ {
+	top := m.scrollY() // eases toward the viewport's position
+	for i := top; i < top+vh; i++ {
 		if i >= 0 && i < len(m.chatContent) {
 			lines = append(lines, m.chatContent[i])
 		} else {

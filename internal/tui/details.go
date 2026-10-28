@@ -30,8 +30,16 @@ type detailsMsg struct {
 	err     error
 }
 
-// detailsW is the panel width, 0 when it is hidden or there is no room.
+// detailsW is the panel width as shown: it slides toward targetDetailsW.
 func (m Model) detailsW() int {
+	if m.anim.on {
+		return m.anim.panel.at()
+	}
+	return m.targetDetailsW()
+}
+
+// targetDetailsW is the panel width, 0 when it is hidden or there is no room.
+func (m Model) targetDetailsW() int {
 	if !m.showDetails {
 		return 0
 	}
@@ -43,7 +51,7 @@ func (m Model) detailsRoom() int {
 	if m.open == nil {
 		return 0
 	}
-	rw := m.rightW()
+	rw := m.width - m.targetLeftW()
 	dw := min(max(minDetailsW, rw*30/100), maxDetailsW)
 	if rw-dw < minChatWithPan {
 		return 0
@@ -55,7 +63,7 @@ func (m Model) detailsRoom() int {
 func (m Model) chatW() int { return m.rightW() - m.detailsW() }
 
 func (m Model) loadDetails() tea.Cmd {
-	if m.open == nil || m.detailsW() == 0 || m.inbox.Locked() {
+	if m.open == nil || m.targetDetailsW() == 0 || m.inbox.Locked() {
 		return nil
 	}
 	a, chat := m.app, *m.open

@@ -160,3 +160,49 @@ type onlinePlatform struct {
 
 func (p *onlinePlatform) ID() core.PlatformID       { return p.id }
 func (p *onlinePlatform) Events() <-chan core.Event { return p.events }
+
+// TestMotionFrames prints every animation frame of the list and the details panel sliding
+// in, for a GIF: TTYL_GALLERY_MOTION=dark go test -run MotionFrames -v ./internal/tui
+func TestMotionFrames(t *testing.T) {
+	if os.Getenv("TTYL_GALLERY_MOTION") == "" {
+		t.Skip("set TTYL_GALLERY_MOTION=dark to print the frames")
+	}
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	useAnimations = true
+	defer func() { useAnimations = false }()
+	a, _, _ := galleryApp(t)
+	m := step(t, New(a), tea.WindowSizeMsg{Width: 110, Height: 28})
+	m = step(t, m, RefreshMsg{})
+	n := 0
+	shot := func() {
+		fmt.Printf("\n===== frame %03d =====\n%s\n", n, m.View())
+		n++
+	}
+	run := func() {
+		for m.anim.ticking {
+			next, _ := m.Update(frameMsg{})
+			m = next.(Model)
+			shot()
+		}
+		for range 8 { // hold the end a moment
+			shot()
+		}
+	}
+	for range 8 {
+		shot()
+	}
+	m = step(t, m, key("enter")) // past the loader
+	shot()
+	run()
+	m = step(t, m, key("enter")) // open Mom
+	shot()
+	run()
+	m = step(t, m, key("G"))
+	m = step(t, m, key("g")) // scroll to the top and back
+	shot()
+	run()
+	m = step(t, m, key("/"))
+	shot()
+	run()
+}

@@ -68,7 +68,7 @@ func run(cmd tea.Cmd) []tea.Msg {
 		return out
 	}
 	switch msg.(type) {
-	case nil, tickMsg, spinner.TickMsg:
+	case nil, tickMsg, spinner.TickMsg, frameMsg: // frames are driven by hand (see frames)
 		return nil
 	}
 	return []tea.Msg{msg}

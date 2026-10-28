@@ -107,6 +107,9 @@ type Model struct {
 
 	spin     spinner.Model // catch-up loader
 	spinning bool          // spinner ticks are running
+	spinStep int           // spinner ticks so far (the loader's running light)
+
+	anim motion // what slides and eases (anim.go)
 
 	ready   bool      // startup is over and the chat list shows (see checkReady)
 	started time.Time // when this UI started
@@ -134,7 +137,7 @@ func New(a *app.App) Model {
 	extend.Placeholder = `type "extend" for 5 more minutes`
 	return Model{app: a, search: search, compose: compose, extend: extend, chatView: viewport.New(0, 0),
 		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now(), started: time.Now(),
-		showDetails: a.Pref(detailsPref) != "off"}
+		showDetails: a.Pref(detailsPref) != "off", anim: newMotion()}
 }
 
 // takeActive returns focused time since the last call.
@@ -220,6 +223,16 @@ func (m Model) openMedia(msg core.Message) tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(frameMsg); ok {
+		return m.frame()
+	}
+	next, cmd := m.update(msg)
+	n := next.(Model)
+	motion := n.retarget(msg)
+	return n, tea.Batch(cmd, motion)
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -264,6 +277,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
+		m.spinStep++
 		return m, cmd
 
 	case inboxMsg:

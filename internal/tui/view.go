@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -41,9 +42,17 @@ func (m Model) chatShown() bool {
 	return m.open != nil && (f == focusChat || f == focusCompose)
 }
 
-// leftW is the chat list's width: a share of the screen, all of it, or none while the chat
-// has the single pane.
+// leftW is the chat list's width as shown: it slides toward targetLeftW.
 func (m Model) leftW() int {
+	if m.anim.on {
+		return m.anim.side.at()
+	}
+	return m.targetLeftW()
+}
+
+// targetLeftW is the chat list's width: a share of the screen, all of it, or none while the
+// chat has the single pane.
+func (m Model) targetLeftW() int {
 	switch {
 	case m.twoPane():
 		return min(max(m.width*34/100, 32), 48)
@@ -92,9 +101,10 @@ func (m Model) View() string {
 	chatW, dw := m.chatW(), m.detailsW()
 	left, right, panel := make([]string, bh), make([]string, bh), make([]string, bh)
 	top, heading := "", ""
-	if lw > 0 {
-		left = m.inboxLines(lw, bh)
-		top, heading = m.sidebarTop(lw), m.inboxHeader(lw)
+	if lw > 0 { // drawn at full width and cut, so it slides in rather than squeezes
+		full := max(lw, m.targetLeftW())
+		left = slideIn(m.inboxLines(full, bh), full, lw)
+		top, heading = slideIn([]string{m.sidebarTop(full)}, full, lw)[0], slideIn([]string{m.inboxHeader(full)}, full, lw)[0]
 	}
 	if rw > 0 {
 		right = m.chatLines(chatW, bh)
@@ -102,8 +112,9 @@ func (m Model) View() string {
 		heading += dimStyle.Render(strings.Repeat("─", chatW))
 	}
 	if dw > 0 {
-		panel = m.detailsLines(dw, bh)
-		heading += m.detailsHeading(dw)
+		full := max(dw, m.anim.panelFull)
+		panel = slideOut(m.detailsLines(full, bh), dw)
+		heading += slideOut([]string{m.detailsHeading(full)}, dw)[0]
 	}
 
 	out := make([]string, 0, m.height)
@@ -113,7 +124,8 @@ func (m Model) View() string {
 	}
 	if m.focus == focusSearch {
 		box := m.searchBox()
-		out = overlay(m.backdrop(out), box, (m.width-m.searchW())/2, max(0, (m.height-len(box))/2))
+		drop := int(math.Round((1 - m.searchIn()) * 2)) // it comes down into place
+		out = overlay(m.backdrop(out), box, (m.width-m.searchW())/2, max(0, (m.height-len(box))/2-drop))
 	}
 	out = append(out, cw.Pad(m.footer(m.width), m.width))
 	return strings.Join(out, "\n")
@@ -157,6 +169,27 @@ func statusText(id core.PlatformID, s core.StatusEvent, bg lipgloss.TerminalColo
 		detail = s.Detail
 	}
 	return style(yellow).Render(dot) + style(faint).Render(" "+name+" ") + style(yellow).Render(detail)
+}
+
+// slideIn shows the right shown cells of lines drawn full wide: a pane entering from the left.
+func slideIn(lines []string, full, shown int) []string {
+	if shown >= full {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = cw.Skip(l, full-shown)
+	}
+	return out
+}
+
+// slideOut shows the left shown cells: a pane entering from the right.
+func slideOut(lines []string, shown int) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = cw.Pad(cw.Truncate(l, shown, ""), shown)
+	}
+	return out
 }
 
 // viewTooSmall asks for a bigger window instead of drawing a broken layout.
@@ -364,12 +397,17 @@ func (m Model) viewLocked() string {
 
 // panel draws a rounded box of w×h cells with the title set into the top border (popups only).
 func panel(title, right string, body []string, w, h int, active bool, divider int) string {
-	b := lipgloss.NewStyle().Foreground(subtle)
-	titleStyle := boldStyle
+	var border lipgloss.TerminalColor = subtle
 	if active {
-		b = b.Foreground(accent)
-		titleStyle = titleStyle.Foreground(accent)
+		border = accent
 	}
+	return panelColor(border, title, right, body, w, h, divider)
+}
+
+// panelColor is panel with any border color (the search box fades its in).
+func panelColor(border lipgloss.TerminalColor, title, right string, body []string, w, h int, divider int) string {
+	b := lipgloss.NewStyle().Foreground(border)
+	titleStyle := boldStyle.Foreground(border)
 	inner := w - 2
 	t := " " + titleStyle.Render(title) + " "
 	r := ""

@@ -17,7 +17,8 @@ type Config struct {
 }
 
 type UI struct {
-	Icons bool `toml:"icons"` // Nerd Font icons; on unless the config turns them off
+	Icons      bool `toml:"icons"`      // Nerd Font icons; on unless the config turns them off
+	Animations bool `toml:"animations"` // panels slide, the chat scrolls smoothly; on unless turned off
 }
 
 // Telegram needs your own API app: https://my.telegram.org → API development tools.
@@ -58,6 +59,8 @@ daily_minutes = 0
 # Icons need a Nerd Font in your terminal (e.g. JetBrainsMono Nerd Font).
 # Set to false if you see boxes or question marks.
 icons = true
+# Panels slide and the chat scrolls smoothly. false makes everything jump into place.
+animations = true
 
 [telegram]
 # Telegram needs your own API app (free): https://my.telegram.org → API development tools.
@@ -103,7 +106,7 @@ func Load(dir string) (Config, error) {
 			return Config{}, err
 		}
 	}
-	cfg := Config{UI: UI{Icons: true}} // defaults for keys older config files don't have
+	cfg := Config{UI: UI{Icons: true, Animations: true}} // defaults for keys older config files don't have
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
