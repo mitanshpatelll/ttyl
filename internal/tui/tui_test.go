@@ -856,3 +856,38 @@ func TestEmojiWhileTyping(t *testing.T) {
 		t.Errorf("sent %q", fake.sent)
 	}
 }
+
+func TestSentAndSeen(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now()
+	msg := func(id string, mine bool, at time.Duration) core.Message {
+		return core.Message{Platform: core.WhatsApp, ChatID: "mom", ID: id, SenderID: "mom", FromMe: mine, Timestamp: now.Add(at), Kind: core.KindText, Body: "text " + id}
+	}
+	st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: "mom", Name: "Mom"}},
+		Messages: []core.Message{msg("a", true, -4*time.Minute), msg("b", false, -3*time.Minute), msg("c", true, -2*time.Minute)},
+		Receipts: []core.Receipt{{ChatID: "mom", IDs: []string{"a"}, Status: core.Seen}}})
+	r, _ := rules.New(nil)
+	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{})
+	m := readyNew(a)
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = step(t, m, key("a")) // all chats: Mom has nothing unread
+	m = step(t, m, RefreshMsg{})
+	if !strings.Contains(m.View(), "✓ You: text c") {
+		t.Errorf("list should show the tick of your last message:\n%s", m.View())
+	}
+	m = step(t, m, key("enter"))
+	view := m.View()
+	if !strings.Contains(view, "text a  ✓✓") || !strings.Contains(view, "text c  ✓ Sent") || strings.Contains(view, "text b  ✓") {
+		t.Errorf("ticks on your messages only, the word on the newest:\n%s", view)
+	}
+	st.Apply(core.BatchEvent{Platform: core.WhatsApp, Receipts: []core.Receipt{{ChatID: "mom", IDs: []string{"c"}, Status: core.Seen}}})
+	m = step(t, m, RefreshMsg{})
+	if !strings.Contains(m.View(), "text c  ✓✓ Seen") {
+		t.Errorf("seen not shown:\n%s", m.View())
+	}
+	checkFits(t, m, "seen")
+}

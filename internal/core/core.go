@@ -72,10 +72,30 @@ type Message struct {
 	Deleted    bool // deleted by the sender; content is gone
 	HasMedia   bool
 	Reactions  []ReactionCount // filled when read from the store
+	Status     Delivery        // for your own messages: how far they got
 
 	// Media is an opaque, platform-specific handle for downloading the attachment later.
 	// Only set when writing; read it back with Store.Media.
 	Media []byte
+}
+
+// Delivery is how far a message you sent got. Anything stored from you is at least Sent.
+type Delivery int
+
+const (
+	Sent      Delivery = iota // on the server
+	Delivered                 // on their phone
+	Seen                      // opened
+)
+
+// Receipt marks your messages in a chat as delivered or seen: the listed IDs, every one up to
+// a message ID (Telegram's numeric IDs), or every one up to a time (Instagram's watermark).
+type Receipt struct {
+	ChatID string
+	IDs    []string
+	UpToID string
+	UpTo   time.Time
+	Status Delivery
 }
 
 type ReactionCount struct {
@@ -159,6 +179,8 @@ type BatchEvent struct {
 	ReadUpTo  map[string]time.Time // chat ID -> read on another device up to this time
 	// ReadUpToMessage is the same, given as the last read message (Telegram reports read IDs).
 	ReadUpToMessage map[string]string
+	// Receipts say the other side got or opened your messages.
+	Receipts []Receipt
 }
 
 type StatusEvent struct {

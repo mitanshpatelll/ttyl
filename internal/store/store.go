@@ -69,6 +69,9 @@ var migrations = []string{
 		sent       INTEGER NOT NULL DEFAULT 0,
 		extensions INTEGER NOT NULL DEFAULT 0
 	);`,
+
+	// 5: delivery of your own messages (0 sent, 1 delivered, 2 seen)
+	`ALTER TABLE messages ADD COLUMN status INTEGER NOT NULL DEFAULT 0;`,
 }
 
 type Store struct {
@@ -185,12 +188,12 @@ func (s *Store) Apply(b core.BatchEvent) error {
 			return err
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO messages (platform, chat_id, id, sender_id, sender_name, from_me, ts, kind, body, meta, edited, deleted, media)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+			INSERT INTO messages (platform, chat_id, id, sender_id, sender_name, from_me, ts, kind, body, meta, edited, deleted, media, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
 			p, m.ChatID, m.ID, m.SenderID, s.sealer.seal(core.Clean(m.SenderName), aad(m.ChatID, m.ID, "sender_name")...),
 			m.FromMe, m.Timestamp.UnixMilli(), m.Kind, s.sealer.seal(core.Clean(m.Body), aad(m.ChatID, m.ID, "body")...),
 			s.sealer.seal(core.Clean(m.Meta), aad(m.ChatID, m.ID, "meta")...), m.Edited, m.Deleted,
-			s.sealer.sealBytes(m.Media, aad(m.ChatID, m.ID, "media")...)); err != nil {
+			s.sealer.sealBytes(m.Media, aad(m.ChatID, m.ID, "media")...), m.Status); err != nil {
 			return err
 		}
 	}
@@ -246,6 +249,11 @@ func (s *Store) Apply(b core.BatchEvent) error {
 			return err
 		}
 	}
+	for _, r := range b.Receipts {
+		if err := applyReceipt(tx, p, r); err != nil {
+			return err
+		}
+	}
 	for chatID, msgID := range b.ReadUpToMessage {
 		if _, err := tx.Exec(`
 			UPDATE chats SET last_read_ts = MAX(last_read_ts, COALESCE(
@@ -257,11 +265,30 @@ func (s *Store) Apply(b core.BatchEvent) error {
 	return tx.Commit()
 }
 
-const messageColumns = `m.id, m.sender_id, m.sender_name, m.from_me, m.ts, m.kind, m.body, m.meta, m.edited, m.deleted, m.media IS NOT NULL`
+// applyReceipt moves your messages forward (never back) to delivered or seen.
+func applyReceipt(tx *sql.Tx, p core.PlatformID, r core.Receipt) error {
+	const mine = `UPDATE messages SET status = ?1 WHERE platform = ?2 AND chat_id = ?3 AND from_me = 1 AND status < ?1`
+	var err error
+	switch {
+	case len(r.IDs) > 0:
+		for _, id := range r.IDs {
+			if _, err = tx.Exec(mine+` AND id = ?4`, r.Status, p, r.ChatID, id); err != nil {
+				return err
+			}
+		}
+	case r.UpToID != "":
+		_, err = tx.Exec(mine+` AND CAST(id AS INTEGER) <= CAST(?4 AS INTEGER)`, r.Status, p, r.ChatID, r.UpToID)
+	case !r.UpTo.IsZero():
+		_, err = tx.Exec(mine+` AND ts <= ?4`, r.Status, p, r.ChatID, r.UpTo.UnixMilli())
+	}
+	return err
+}
+
+const messageColumns = `m.id, m.sender_id, m.sender_name, m.from_me, m.ts, m.kind, m.body, m.meta, m.edited, m.deleted, m.media IS NOT NULL, m.status`
 
 func scanMessage(sc interface{ Scan(...any) error }, m *core.Message, extra ...any) error {
 	var ts int64
-	dest := append([]any{&m.ID, &m.SenderID, &m.SenderName, &m.FromMe, &ts, &m.Kind, &m.Body, &m.Meta, &m.Edited, &m.Deleted, &m.HasMedia}, extra...)
+	dest := append([]any{&m.ID, &m.SenderID, &m.SenderName, &m.FromMe, &ts, &m.Kind, &m.Body, &m.Meta, &m.Edited, &m.Deleted, &m.HasMedia, &m.Status}, extra...)
 	if err := sc.Scan(dest...); err != nil {
 		return err
 	}

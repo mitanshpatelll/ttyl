@@ -1,7 +1,9 @@
 package store
 
 import (
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,5 +59,52 @@ func TestDetailsQueries(t *testing.T) {
 	}
 	if v, _ := st.Pref("details"); v != "off" {
 		t.Errorf("pref = %q", v)
+	}
+}
+
+func TestReceipts(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "t.db"), make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now()
+	mine := func(id string, at time.Duration) core.Message {
+		return core.Message{Platform: core.Telegram, ChatID: "c", ID: id, SenderID: "me", FromMe: true, Timestamp: now.Add(at), Kind: core.KindText, Body: id}
+	}
+	theirs := core.Message{Platform: core.Telegram, ChatID: "c", ID: "3", SenderID: "x", Timestamp: now, Kind: core.KindText, Body: "hi"}
+	if err := s.Apply(core.BatchEvent{Platform: core.Telegram, Messages: []core.Message{mine("2", -3*time.Minute), mine("9", -2*time.Minute), mine("10", -time.Minute), theirs}}); err != nil {
+		t.Fatal(err)
+	}
+	status := func() string {
+		msgs, err := s.Messages(core.Telegram, "c", now.Add(time.Hour).UnixMilli(), 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, m := range msgs {
+			out = append(out, fmt.Sprintf("%s:%d", m.ID, m.Status))
+		}
+		return strings.Join(out, " ")
+	}
+	apply := func(r core.Receipt) {
+		t.Helper()
+		r.ChatID = "c"
+		if err := s.Apply(core.BatchEvent{Platform: core.Telegram, Receipts: []core.Receipt{r}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	apply(core.Receipt{UpToID: "9", Status: core.Seen}) // numeric: 10 is after 9, though "10" < "9" as text
+	if got := status(); got != "2:2 9:2 10:0 3:0" {
+		t.Errorf("up to ID 9: %s", got)
+	}
+	apply(core.Receipt{IDs: []string{"10"}, Status: core.Delivered})
+	apply(core.Receipt{IDs: []string{"9", "3"}, Status: core.Delivered}) // never back, never theirs
+	if got := status(); got != "2:2 9:2 10:1 3:0" {
+		t.Errorf("by ID: %s", got)
+	}
+	apply(core.Receipt{UpTo: now, Status: core.Seen})
+	if got := status(); got != "2:2 9:2 10:2 3:0" {
+		t.Errorf("up to a time: %s", got)
 	}
 }

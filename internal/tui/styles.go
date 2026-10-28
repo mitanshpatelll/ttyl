@@ -24,6 +24,7 @@ var (
 	green      = lipgloss.AdaptiveColor{Light: "#1A7F37", Dark: "#3FB950"}
 	yellow     = lipgloss.AdaptiveColor{Light: "#9A6700", Dark: "#D29922"}
 	red        = lipgloss.AdaptiveColor{Light: "#CF222E", Dark: "#F23F43"}
+	seenBlue   = lipgloss.AdaptiveColor{Light: "#0969DA", Dark: "#53BDEB"} // the blue ticks
 	white      = lipgloss.Color("#FFFFFF")
 
 	// People get stable, bright colors (avatars and names).

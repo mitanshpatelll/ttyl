@@ -396,6 +396,8 @@ func (c *Client) handleMailbox(mailbox *slidetypes.Mailbox) {
 		for _, r := range info.SlideReadReceipts {
 			if r.ParticipantFBID == self {
 				b.ReadUpTo[chatID] = r.WatermarkTimestampMS.Time
+			} else if !r.WatermarkTimestampMS.Time.IsZero() { // they saw your messages up to here
+				b.Receipts = append(b.Receipts, core.Receipt{ChatID: chatID, UpTo: r.WatermarkTimestampMS.Time, Status: core.Seen})
 			}
 		}
 	}
@@ -473,6 +475,8 @@ func (c *Client) handleDelta(ctx context.Context, d *slidetypes.Delta) {
 	case *slidetypes.ReadReceiptEvent:
 		if e.ReadReceipt.ParticipantFBID == self {
 			b.ReadUpTo = map[string]time.Time{chatID: e.ReadReceipt.WatermarkTimestampMS.Time}
+		} else if at := e.ReadReceipt.WatermarkTimestampMS.Time; !at.IsZero() { // they saw your messages up to here
+			b.Receipts = []core.Receipt{{ChatID: chatID, UpTo: at, Status: core.Seen}}
 		}
 	case *slidetypes.UpdateThreadNameEvent:
 		c.mu.Lock()
@@ -484,7 +488,7 @@ func (c *Client) handleDelta(ctx context.Context, d *slidetypes.Delta) {
 	default:
 		return
 	}
-	if len(b.Chats)+len(b.Messages)+len(b.Edits)+len(b.Deletes)+len(b.Reactions)+len(b.ReadUpTo) > 0 {
+	if len(b.Chats)+len(b.Messages)+len(b.Edits)+len(b.Deletes)+len(b.Reactions)+len(b.ReadUpTo)+len(b.Receipts) > 0 {
 		c.emit(b)
 	}
 }

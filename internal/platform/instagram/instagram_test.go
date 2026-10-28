@@ -118,10 +118,17 @@ func TestMailboxAndDeltas(t *testing.T) {
 	if b := next(t, c); !b.ReadUpTo["10"].Equal(at.Add(time.Minute)) {
 		t.Errorf("read batch = %+v", b)
 	}
+	// Someone else's read receipt: your messages up to its watermark were seen.
+	c.handleDelta(context.Background(), &slidetypes.Delta{ThreadIGID: "chat-11", Data: &slidetypes.ReadReceiptEvent{
+		ReadReceipt: slidetypes.ReadReceipt{ParticipantFBID: 2, WatermarkTimestampMS: ms(at.Add(2 * time.Minute))}}})
+	if b := next(t, c); len(b.Receipts) != 1 || b.Receipts[0].ChatID != "11" || b.Receipts[0].Status != core.Seen ||
+		!b.Receipts[0].UpTo.Equal(at.Add(2*time.Minute)) || len(b.ReadUpTo) != 0 {
+		t.Errorf("seen batch = %+v", b)
+	}
 	c.handleDelta(context.Background(), &slidetypes.Delta{ThreadIGID: "chat-11", Data: &slidetypes.ReadReceiptEvent{ReadReceipt: slidetypes.ReadReceipt{ParticipantFBID: 2}}})
 	select {
 	case evt := <-c.events:
-		t.Errorf("someone else's read receipt produced %+v", evt)
+		t.Errorf("a read receipt without a time produced %+v", evt)
 	case <-time.After(50 * time.Millisecond):
 	}
 }

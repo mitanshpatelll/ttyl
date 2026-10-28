@@ -344,9 +344,24 @@ func (c *Client) register(d tg.UpdateDispatcher) {
 	d.OnReadChannelInbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelInbox) error {
 		return read(channelID(u.ChannelID), u.MaxID)
 	})
+	// They read your messages up to MaxID. Telegram has no "delivered": one tick, then seen.
+	seen := func(chatID string, maxID int) error {
+		c.emit(core.BatchEvent{Platform: core.Telegram, Receipts: []core.Receipt{seenUpTo(chatID, maxID)}})
+		return nil
+	}
+	d.OnReadHistoryOutbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadHistoryOutbox) error {
+		return seen(peerID(u.Peer), u.MaxID)
+	})
+	d.OnReadChannelOutbox(func(_ context.Context, _ tg.Entities, u *tg.UpdateReadChannelOutbox) error {
+		return seen(channelID(u.ChannelID), u.MaxID)
+	})
 }
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
+
+func seenUpTo(chatID string, maxID int) core.Receipt {
+	return core.Receipt{ChatID: chatID, UpToID: strconv.Itoa(maxID), Status: core.Seen}
+}
 
 // catchUp loads recent dialogs and fetches history for chats with messages ttyl hasn't seen.
 // Seen marks are saved when the client stops, after these events have been drained to the store.
@@ -370,8 +385,8 @@ func (c *Client) catchUp(ctx context.Context) {
 	c.learnChats(dialogs.GetChats())
 
 	type target struct {
-		chatID       string
-		top, readMax int
+		chatID                string
+		top, readMax, seenMax int
 	}
 	var targets []target
 	batch := core.BatchEvent{Platform: core.Telegram}
@@ -390,8 +405,11 @@ func (c *Client) catchUp(ctx context.Context) {
 			continue
 		}
 		batch.Chats = append(batch.Chats, c.chat(id))
+		if dlg.ReadOutboxMaxID > 0 {
+			batch.Receipts = append(batch.Receipts, seenUpTo(id, dlg.ReadOutboxMaxID))
+		}
 		if dlg.TopMessage > c.state.seen(id) {
-			targets = append(targets, target{id, dlg.TopMessage, dlg.ReadInboxMaxID})
+			targets = append(targets, target{id, dlg.TopMessage, dlg.ReadInboxMaxID, dlg.ReadOutboxMaxID})
 		}
 	}
 	c.emit(batch)
@@ -420,7 +438,8 @@ func (c *Client) catchUp(ctx context.Context) {
 			c.emit(core.BatchEvent{Platform: core.Telegram, Messages: msgs})
 			continue
 		}
-		b := core.BatchEvent{Platform: core.Telegram, Chats: []core.Chat{c.chat(t.chatID)}, Messages: msgs, ReadUpTo: map[string]time.Time{}}
+		b := core.BatchEvent{Platform: core.Telegram, Chats: []core.Chat{c.chat(t.chatID)}, Messages: msgs, ReadUpTo: map[string]time.Time{},
+			Receipts: []core.Receipt{seenUpTo(t.chatID, t.seenMax)}}
 		// Everything up to the dialog's read marker was read on another device.
 		for _, m := range msgs {
 			if !m.FromMe && atoi(m.ID) <= t.readMax && m.Timestamp.After(b.ReadUpTo[t.chatID]) {

@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -238,10 +239,16 @@ func (c *Client) handle(evt any) {
 	case *events.HistorySync:
 		c.handleHistory(v)
 	case *events.Receipt:
-		// Read on the phone or another linked device: clear unread here too.
-		if v.IsFromMe && (v.Type == types.ReceiptTypeRead || v.Type == types.ReceiptTypeReadSelf) {
-			chatID := c.normalize(v.Chat).String()
+		chatID := c.normalize(v.Chat).String()
+		switch {
+		case v.IsFromMe && (v.Type == types.ReceiptTypeRead || v.Type == types.ReceiptTypeReadSelf):
+			// Read on the phone or another linked device: clear unread here too.
 			c.emit(core.BatchEvent{Platform: core.WhatsApp, ReadUpTo: map[string]time.Time{chatID: v.Timestamp}})
+		case !v.IsFromMe:
+			// They got or opened your messages. In a group, the first member to do so counts.
+			if st, ok := receiptStatus(v.Type); ok {
+				c.emit(core.BatchEvent{Platform: core.WhatsApp, Receipts: []core.Receipt{{ChatID: chatID, IDs: v.MessageIDs, Status: st}}})
+			}
 		}
 	case *events.Connected:
 		c.emit(core.StatusEvent{Platform: core.WhatsApp, State: core.StateConnected})
@@ -258,6 +265,28 @@ func (c *Client) handle(evt any) {
 	case *events.AppStateSyncComplete:
 		go c.refreshNames()
 	}
+}
+
+// receiptStatus maps a receipt from the other side to how far your message got.
+func receiptStatus(t types.ReceiptType) (core.Delivery, bool) {
+	switch t {
+	case types.ReceiptTypeDelivered:
+		return core.Delivered, true
+	case types.ReceiptTypeRead, types.ReceiptTypePlayed:
+		return core.Seen, true
+	}
+	return 0, false
+}
+
+// historyStatus is the same for a message of yours in history sync.
+func historyStatus(s waWeb.WebMessageInfo_Status) (core.Delivery, bool) {
+	switch s {
+	case waWeb.WebMessageInfo_DELIVERY_ACK:
+		return core.Delivered, true
+	case waWeb.WebMessageInfo_READ, waWeb.WebMessageInfo_PLAYED:
+		return core.Seen, true
+	}
+	return 0, false
 }
 
 func (c *Client) handleHistory(v *events.HistorySync) {
@@ -286,6 +315,8 @@ func (c *Client) handleHistory(v *events.HistorySync) {
 			}
 			if !msg.FromMe {
 				incoming = append(incoming, msg.Timestamp)
+			} else if st, ok := historyStatus(hm.GetMessage().GetStatus()); ok {
+				batch.Receipts = append(batch.Receipts, core.Receipt{ChatID: chat.ID, IDs: []string{msg.ID}, Status: st})
 			}
 			// History carries reactions on the message itself rather than as separate events.
 			for _, r := range hm.GetMessage().GetReactions() {

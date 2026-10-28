@@ -259,7 +259,8 @@ func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
 	if c.Unread > 0 {
 		previewStyle = bg(lipgloss.NewStyle().Foreground(secondary))
 	}
-	preview := previewStyle.Render(cw.Truncate(previewText(c), max(1, w-7-cw.String(pill)-3), "…"))
+	tick := previewTicks(c, shade)
+	preview := tick + previewStyle.Render(cw.Truncate(previewText(c), max(1, w-7-cw.String(pill)-3-cw.String(tick)), "…"))
 
 	// Name and preview start in the same column; time and unread count end in the same column.
 	line := func(left, right string) string {
@@ -270,6 +271,14 @@ func (m Model) inboxRow(c core.ChatSummary, selected bool, w int) []string {
 		line(edge+plain.Render(" ")+avatar(chatKey(c.Chat), c.Title())+plain.Render(" ")+name, when),
 		line(edge+plain.Render("      ")+preview, pill),
 	}
+}
+
+// previewTicks: when the last message is yours, how far it got, in front of the preview.
+func previewTicks(c core.ChatSummary, shade lipgloss.TerminalColor) string {
+	if !c.Last.FromMe || c.Last.Deleted {
+		return ""
+	}
+	return on(shade)(deliveryStyle(c.Last.Status)).Render(strings.TrimSpace(cw.Strip(ticks(c.Last.Status))) + " ")
 }
 
 func previewText(c core.ChatSummary) string {

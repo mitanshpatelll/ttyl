@@ -193,6 +193,12 @@ func (m *Model) renderChat() {
 	var lines []string
 	var lastDay string
 	newShown := false
+	lastMine := -1 // your newest message says in words how far it got
+	for i, msg := range m.messages {
+		if msg.FromMe && !msg.Deleted {
+			lastMine = i
+		}
+	}
 	for i, msg := range m.messages {
 		breakHere := false
 		if day := dayLabel(msg.Timestamp, now); day != lastDay {
@@ -217,7 +223,7 @@ func (m *Model) renderChat() {
 			lines = append(lines, "") // space between people
 		}
 		m.starts = append(m.starts, len(lines))
-		lines = append(lines, m.message(msg, w, header, i == m.sel && m.focus == focusChat, now)...)
+		lines = append(lines, m.message(msg, w, header, i == m.sel && m.focus == focusChat, i == lastMine, now)...)
 	}
 	// Short chats sit at the bottom, next to the input, like any chat app.
 	if pad := m.chatView.Height - len(lines); pad > 0 {
@@ -248,8 +254,8 @@ func (m *Model) setChatContent(lines []string) {
 // message renders one message Discord style. The first of a run gets a header (avatar,
 // bold colored name, time); its text and any follow-ups sit underneath, aligned with the name.
 // The selected message gets an accent edge on every line.
-func (m *Model) message(msg core.Message, w int, header, selected bool, now time.Time) []string {
-	key := fmt.Sprint(msg.ID, header, selected, msg.Body, msg.Meta, msg.Edited, msg.Deleted, msg.Reactions, msg.SenderName, sameDay(msg.Timestamp, now))
+func (m *Model) message(msg core.Message, w int, header, selected, lastMine bool, now time.Time) []string {
+	key := fmt.Sprint(msg.ID, header, selected, msg.Body, msg.Meta, msg.Edited, msg.Deleted, msg.Reactions, msg.SenderName, sameDay(msg.Timestamp, now), msg.Status, lastMine)
 	if cached, ok := m.bubbles[key]; ok {
 		return cached
 	}
@@ -298,6 +304,17 @@ func (m *Model) message(msg core.Message, w int, header, selected bool, now time
 			out = append(out, indent+dimStyle.Render("(edited)"))
 		}
 	}
+	if msg.FromMe && !msg.Deleted {
+		mark := ticks(msg.Status)
+		if lastMine {
+			mark += " " + deliveryStyle(msg.Status).Render(deliveryWords[msg.Status])
+		}
+		if last := out[len(out)-1]; cw.String(last)+2+cw.String(mark) <= w {
+			out[len(out)-1] = last + "  " + mark
+		} else {
+			out = append(out, indent+mark)
+		}
+	}
 	if len(msg.Reactions) > 0 {
 		parts := make([]string, len(msg.Reactions))
 		for i, r := range msg.Reactions {
@@ -310,6 +327,24 @@ func (m *Model) message(msg core.Message, w int, header, selected bool, now time
 	}
 	m.bubbles[key] = out
 	return out
+}
+
+var deliveryWords = map[core.Delivery]string{core.Sent: "Sent", core.Delivered: "Delivered", core.Seen: "Seen"}
+
+func deliveryStyle(s core.Delivery) lipgloss.Style {
+	if s == core.Seen {
+		return lipgloss.NewStyle().Foreground(seenBlue)
+	}
+	return dimStyle
+}
+
+// ticks shows how far a message of yours got, like WhatsApp: ✓ sent, ✓✓ delivered, and
+// blue ✓✓ once seen.
+func ticks(s core.Delivery) string {
+	if s == core.Sent {
+		return dimStyle.Render("✓")
+	}
+	return deliveryStyle(s).Render("✓✓")
 }
 
 // mediaTag is the placeholder shown instead of media: " voice 0:12", or "[voice 0:12]"

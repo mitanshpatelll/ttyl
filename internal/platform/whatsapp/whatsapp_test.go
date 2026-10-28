@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -165,5 +166,22 @@ func TestOfflineSyncProgress(t *testing.T) {
 	c.handle(&events.OfflineSyncCompleted{})
 	if got := syncs(); len(got) != 1 || got[0].Total != 9 {
 		t.Errorf("after receipts-only and dropped syncs = %+v, want only the 9-message start", got)
+	}
+}
+
+func TestReceiptStatus(t *testing.T) {
+	for typ, want := range map[types.ReceiptType]core.Delivery{types.ReceiptTypeDelivered: core.Delivered, types.ReceiptTypeRead: core.Seen, types.ReceiptTypePlayed: core.Seen} {
+		if got, ok := receiptStatus(typ); !ok || got != want {
+			t.Errorf("receipt %q = %v %v, want %v", typ, got, ok, want)
+		}
+	}
+	if _, ok := receiptStatus(types.ReceiptTypeRetry); ok {
+		t.Error("a retry receipt says nothing about delivery")
+	}
+	if got, ok := historyStatus(waWeb.WebMessageInfo_READ); !ok || got != core.Seen {
+		t.Errorf("history READ = %v %v", got, ok)
+	}
+	if _, ok := historyStatus(waWeb.WebMessageInfo_SERVER_ACK); ok {
+		t.Error("server ack is plain sent")
 	}
 }

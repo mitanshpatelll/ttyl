@@ -70,6 +70,8 @@ func galleryApp(t *testing.T) (*app.App, *onlinePlatform, *onlinePlatform) {
 			msg(wa, "trip", "t4", "raj", "Raj", false, ago(49), "haha"),
 		},
 		ReadUpTo: map[string]time.Time{"mom": ago(25), "trip": ago(60)},
+		Receipts: []core.Receipt{{ChatID: "mom", IDs: []string{"m2"}, Status: core.Seen}, {ChatID: "mom", IDs: []string{"m3"}, Status: core.Delivered},
+			{ChatID: "trip", IDs: []string{"t2"}, Status: core.Seen}},
 	})
 	st.Apply(core.BatchEvent{Platform: wa,
 		Chats: []core.Chat{
