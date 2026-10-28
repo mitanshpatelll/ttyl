@@ -82,6 +82,9 @@ func (m Model) View() string {
 	if m.inbox.Locked() {
 		return m.viewLocked()
 	}
+	if !m.ready {
+		return m.viewStarting()
+	}
 	if m.help {
 		return m.viewHelp()
 	}

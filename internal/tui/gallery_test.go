@@ -103,7 +103,7 @@ func gallery(t *testing.T, width, height int) {
 	wa, tg := core.WhatsApp, core.Telegram
 	{
 		size := [2]int{width, height}
-		m := New(a)
+		m := readyNew(a)
 		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m = step(t, m, RefreshMsg{})
 		shot := func(label string) {

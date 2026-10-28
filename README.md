@@ -50,7 +50,7 @@ never the point.
 - a details panel next to the chat (`space` `e`): who it is, shared media, links, files, and who talks in a group
 - unread line, jump to first unread
 - `/` opens a search box in the middle of the screen; results show as you type, `enter` opens
-- loader with real counts when you come back to a big backlog
+- on start, a full-screen loader with real counts until every app has caught up (`enter` skips it), so the chat list shows up complete
 - fits any terminal from 30×8 up: narrow windows show the list or the chat, one at a time; very wide ones keep lines readable
 - Nerd Font icons (JetBrainsMono Nerd Font etc.), with a plain-text fallback
 - edits, unsends and reactions show up; media downloads only when you press `o`

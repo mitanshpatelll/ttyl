@@ -51,7 +51,7 @@ func TestEverySize(t *testing.T) {
 		}
 	}
 	// Each screen is set up once, then the window is resized through every size.
-	m := step(t, New(a), tea.WindowSizeMsg{Width: 100, Height: 30})
+	m := step(t, readyNew(a), tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = step(t, m, RefreshMsg{})
 	resize(m, "inbox")
 	m = keys(m, "j", "enter")
@@ -74,7 +74,9 @@ func TestEverySize(t *testing.T) {
 	wa1.events <- core.SyncEvent{Platform: core.WhatsApp, Active: true, Done: 768, Total: 1234, Unit: "messages"}
 	a.Drain()
 	m = step(t, New(a), tea.WindowSizeMsg{Width: 100, Height: 30})
-	resize(step(t, m, RefreshMsg{}), "catching up")
+	resize(step(t, m, RefreshMsg{}), "startup loader")
+	m = step(t, readyNew(a), tea.WindowSizeMsg{Width: 100, Height: 30})
+	resize(step(t, m, RefreshMsg{}), "catching up later")
 	small := step(t, New(a), tea.WindowSizeMsg{Width: 20, Height: 5})
 	if !strings.Contains(small.View(), "window too small") || !strings.Contains(small.View(), "20×5, need 30×8") {
 		t.Errorf("too small:\n%s", small.View())
@@ -87,7 +89,7 @@ func TestEverySize(t *testing.T) {
 // TestOnePane: on a narrow window the list and the chat take turns on the whole screen.
 func TestOnePane(t *testing.T) {
 	a, _, _ := galleryApp(t)
-	m := step(t, New(a), tea.WindowSizeMsg{Width: 60, Height: 20})
+	m := step(t, readyNew(a), tea.WindowSizeMsg{Width: 60, Height: 20})
 	m = step(t, m, RefreshMsg{})
 	if v := m.View(); !strings.Contains(v, "UNREAD") || strings.Contains(v, "no chat open") || m.leftW() != 60 {
 		t.Fatalf("list should fill the screen:\n%s", v)

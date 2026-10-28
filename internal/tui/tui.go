@@ -105,6 +105,11 @@ type Model struct {
 	spin     spinner.Model // catch-up loader
 	spinning bool          // spinner ticks are running
 
+	ready   bool      // startup is over and the chat list shows (see checkReady)
+	started time.Time // when this UI started
+	settled time.Time // since when every app has been connected and quiet
+	checkAt time.Time // a readiness check is due then
+
 	flash string // last error, cleared on the next key press
 	note  string // last info message, cleared on the next key press
 }
@@ -125,7 +130,7 @@ func New(a *app.App) Model {
 	extend.Prompt = "> "
 	extend.Placeholder = `type "extend" for 5 more minutes`
 	return Model{app: a, search: search, compose: compose, extend: extend, chatView: viewport.New(0, 0),
-		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now(),
+		spin: spinner.New(spinner.WithSpinner(loaderFrames)), focused: true, activeFrom: time.Now(), started: time.Now(),
 		showDetails: a.Pref(detailsPref) != "off"}
 }
 
@@ -245,8 +250,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flash = msg.err.Error()
 		return m, nil
 
+	case readyMsg:
+		m.checkAt = time.Time{}
+		return m, m.loadInbox()
+
 	case spinner.TickMsg:
-		if !m.syncing() {
+		if !m.loading() {
 			m.spinning = false
 			return m, nil
 		}
@@ -278,7 +287,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		return m, m.startSpinner()
+		ready := m.checkReady(time.Now())
+		return m, tea.Batch(ready, m.startSpinner())
 
 	case messagesMsg:
 		if msg.err != nil {
@@ -403,6 +413,15 @@ func (m Model) handleKey(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.inbox.Locked() {
 		return m.handleLockedKey(k)
+	}
+	if !m.ready { // the startup loader: wait, look anyway, or leave
+		switch k.String() {
+		case "q":
+			return m, tea.Quit
+		case "enter":
+			m.ready = true
+		}
+		return m, nil
 	}
 	typing := m.focus == focusCompose || m.focus == focusSearch
 	if m.help {

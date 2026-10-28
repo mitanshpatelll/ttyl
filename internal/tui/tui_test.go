@@ -74,6 +74,13 @@ func run(cmd tea.Cmd) []tea.Msg {
 	return []tea.Msg{msg}
 }
 
+// readyNew is a model past the startup loader, for tests about everything after it.
+func readyNew(a *app.App) Model {
+	m := New(a)
+	m.ready = true
+	return m
+}
+
 func key(s string) tea.KeyMsg {
 	switch s {
 	case "enter":
@@ -116,7 +123,7 @@ func TestLayoutAndFlow(t *testing.T) {
 	fake := &fakePlatform{}
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, fake)
 
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = step(t, m, RefreshMsg{})
 	checkFits(t, m, "inbox")
@@ -209,7 +216,7 @@ func TestChatSelectionMediaAndPaging(t *testing.T) {
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(),
 		Reveal: func(p string) error { revealed = p; return nil }}, &fakePlatform{})
 
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 20})
 	m = step(t, m, RefreshMsg{})
 	m = step(t, m, key("enter"))
@@ -254,7 +261,7 @@ func TestBudgetLockAndExtend(t *testing.T) {
 	defer st.Close()
 	r, _ := rules.New(nil)
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop(), DailyLimit: time.Minute}, &fakePlatform{})
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = step(t, m, RefreshMsg{})
 	if !strings.Contains(m.View(), "1m left") {
@@ -317,7 +324,7 @@ func TestSectionsPerPlatform(t *testing.T) {
 	}
 	r, _ := rules.New(nil)
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{})
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 90, Height: 16})
 
 	add(core.WhatsApp, "Mom")
@@ -348,7 +355,7 @@ func TestHelpOverlay(t *testing.T) {
 	}
 	defer st.Close()
 	r, _ := rules.New(nil)
-	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m := readyNew(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
 	m = step(t, m, key("?"))
 	if !strings.Contains(m.View(), "open attachment") {
@@ -384,7 +391,7 @@ func TestDraftComesBackOnlyToItsChat(t *testing.T) {
 	}
 	r, _ := rules.New(nil)
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &failingPlatform{})
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = step(t, m, RefreshMsg{})
 	m = step(t, m, key("i"))
@@ -431,7 +438,7 @@ func TestOpeningJumpsToFirstUnread(t *testing.T) {
 	st.Apply(core.BatchEvent{Platform: core.WhatsApp, Chats: []core.Chat{{Platform: core.WhatsApp, ID: "c", Name: "Ann"}}, Messages: msgs,
 		ReadUpTo: map[string]time.Time{"c": start.Add(29 * time.Minute)}}) // 30..39 unread
 	r, _ := rules.New(nil)
-	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m := readyNew(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = step(t, m, RefreshMsg{})
 	m = step(t, m, key("enter"))
@@ -461,25 +468,41 @@ func TestCatchUpLoader(t *testing.T) {
 	ig.events <- core.SyncEvent{Platform: core.Instagram, Active: true, Unit: "chats"}
 	a.Drain()
 
-	for _, size := range [][2]int{{110, 30}, {80, 24}} {
+	// At startup the loader has the whole screen: no chat list until every app is done.
+	for _, size := range [][2]int{{110, 30}, {80, 24}, {50, 16}} {
 		m := New(a)
 		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m = step(t, m, RefreshMsg{})
-		label := fmt.Sprintf("loader %dx%d", size[0], size[1])
+		label := fmt.Sprintf("startup %dx%d", size[0], size[1])
 		checkFits(t, m, label)
 		view := m.View()
-		for _, want := range []string{"WA 62%", "TG 7%", "Catching up on what you missed", "768 of 1,234 messages", "3 of 40 chats", "loading chats…", "Syncing your chats"} {
+		for _, want := range []string{"Catching up on what you missed", "768 of 1,234 messages", "3 of 40 chats", "loading chats…", "show chats now"} {
 			if !strings.Contains(view, want) {
 				t.Errorf("%s: missing %q:\n%s", label, want, view)
 			}
 		}
-		if !m.spinning {
-			t.Errorf("%s: spinner not started", label)
+		if strings.Contains(view, "UNREAD") || !m.spinning {
+			t.Errorf("%s: list shown (or no spinner) during startup:\n%s", label, view)
+		}
+	}
+
+	// A sync later on (a reconnect) leaves the list alone and shows in the top bar.
+	for _, size := range [][2]int{{110, 30}, {80, 24}} {
+		m := readyNew(a)
+		m = step(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m = step(t, m, RefreshMsg{})
+		label := fmt.Sprintf("later %dx%d", size[0], size[1])
+		checkFits(t, m, label)
+		view := m.View()
+		for _, want := range []string{"WA 62%", "TG 7%", "Catching up on what you missed", "768 of 1,234 messages", "UNREAD", "Syncing your chats"} {
+			if !strings.Contains(view, want) {
+				t.Errorf("%s: missing %q:\n%s", label, want, view)
+			}
 		}
 	}
 
 	// Done everywhere: the welcome text comes back and the spinner stops at its next tick.
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = step(t, m, RefreshMsg{})
 	wa.events <- core.SyncEvent{Platform: core.WhatsApp}
@@ -522,7 +545,7 @@ func TestUnreadOnlyAndSearch(t *testing.T) {
 	add(core.WhatsApp, "raj", "Raj", true)
 	add(core.Telegram, "dev", "Dev chat", false)
 	r, _ := rules.New(nil)
-	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m := readyNew(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 	m = step(t, m, RefreshMsg{})
 	names := func() string {
@@ -623,7 +646,7 @@ func TestDetailsPanel(t *testing.T) {
 	}
 	r, _ := rules.New(nil)
 	a := app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{})
-	m := New(a)
+	m := readyNew(a)
 	m = step(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
 	m = step(t, m, RefreshMsg{})
 	m = step(t, m, key("enter"))
@@ -692,5 +715,64 @@ func TestSearchRanking(t *testing.T) {
 		if strings.Join(got, ",") != want {
 			t.Errorf("search %q = %q, want %q", query, strings.Join(got, ","), want)
 		}
+	}
+}
+
+func TestStartupWaitsForEveryApp(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"), testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, _ := rules.New(nil)
+	m := New(app.New(app.Options{Store: st, Rules: r, MediaDir: t.TempDir(), Log: zerolog.Nop()}, &fakePlatform{}))
+	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = step(t, m, RefreshMsg{}) // WhatsApp is still connecting
+	at := func(d time.Duration) time.Time { return m.started.Add(d) }
+	if m.ready || !strings.Contains(m.View(), "Connecting to your apps") || !strings.Contains(m.View(), "connecting…") {
+		t.Fatalf("startup loader missing:\n%s", m.View())
+	}
+
+	// Connected: the list waits a moment in case a sync starts right away.
+	m.inbox.Status[core.WhatsApp] = core.StatusEvent{Platform: core.WhatsApp, State: core.StateConnected}
+	if m.checkReady(at(time.Second)) == nil || m.ready {
+		t.Error("should wait for things to settle")
+	}
+	m.inbox.Sync = map[core.PlatformID]core.SyncEvent{core.WhatsApp: {Platform: core.WhatsApp, Active: true, Done: 1, Total: 9, Unit: "messages"}}
+	if m.checkReady(at(2 * time.Second)); m.ready || !m.settled.IsZero() {
+		t.Error("a sync must hold the list back and restart the wait")
+	}
+	if m.checkReady(at(5 * time.Minute)); m.ready {
+		t.Error("a long sync still holds it back")
+	}
+	m.inbox.Sync = nil
+	m.checkReady(at(5*time.Minute + time.Second))
+	if m.checkReady(at(5*time.Minute + 2*time.Second)); m.ready {
+		t.Error("ready before settling")
+	}
+	if m.checkReady(at(5*time.Minute + 3*time.Second)); !m.ready {
+		t.Error("not ready after settling")
+	}
+
+	// An app that can't connect holds it up for connectWait at most.
+	m.ready, m.settled = false, time.Time{}
+	m.inbox.Status[core.WhatsApp] = core.StatusEvent{Platform: core.WhatsApp, State: core.StateConnecting}
+	if m.checkReady(at(connectWait - time.Second)); m.ready || !m.settled.IsZero() {
+		t.Error("gave up on connecting too early")
+	}
+	m.checkReady(at(connectWait))
+	if m.checkReady(at(connectWait + settleTime)); !m.ready {
+		t.Error("still waiting for an app that can't connect")
+	}
+
+	// enter shows the chats right away; q quits.
+	m.ready = false
+	m = step(t, m, key("j"))
+	if m.ready {
+		t.Error("j should do nothing on the loader")
+	}
+	m = step(t, m, key("enter"))
+	if !m.ready || !strings.Contains(m.View(), "UNREAD") {
+		t.Errorf("enter did not show the chats:\n%s", m.View())
 	}
 }
