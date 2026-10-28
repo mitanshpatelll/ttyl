@@ -82,6 +82,7 @@ jobs:
             --title "ttyl $GITHUB_REF_NAME" --notes-file notes.md --generate-notes
       - name: Point the Homebrew formula at this release
         run: |
+          mkdir -p Formula
           scripts/formula.sh "${GITHUB_REF_NAME#v}" dist/checksums.txt > Formula/ttyl.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -32,7 +32,7 @@ url="https://github.com/$repo/releases/download/$version"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-echo "Downloading ttyl $version for $os/$arch…"
+echo "Downloading ttyl ${version} for ${os}/${arch}..."
 curl -fsSL -o "$tmp/$name.tar.gz" "$url/$name.tar.gz" || fail "download failed: $url/$name.tar.gz"
 curl -fsSL -o "$tmp/checksums.txt" "$url/checksums.txt" || fail "couldn't get checksums.txt"
 
